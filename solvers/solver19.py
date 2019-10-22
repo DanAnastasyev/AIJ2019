@@ -17,7 +17,7 @@ def _iterate_subsets(elements):
 
 
 class Solver(AbstractSolver):
-    def __init__(self, models_dir='/home/dan-anastasev/Documents/stanfordnlp_resources/'):
+    def __init__(self, models_dir='data/stanfordnlp_resources/'):
         self._pipeline = stanfordnlp.Pipeline(lang='ru', models_dir=models_dir)
 
     @staticmethod
@@ -76,10 +76,3 @@ class Solver(AbstractSolver):
 
     def save(self, path):
         pass
-
-
-if __name__ == "__main__":
-    text = "Расставьте знаки препинания: укажите цифру(-ы), на месте которой(-ых) в предложении должна(-ы) стоять запятая(-ые). Все с участием спрашивали об её здоровье и слышали в ответ (1) что она занята необходимыми делами (2) по окончании (3) которых (4) непременно явится."
-
-    solver = Solver()
-    print(solver._get_sentence({'text': text}))

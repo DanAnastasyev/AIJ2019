@@ -1,5 +1,6 @@
 import os
 import random
+from collections import OrderedDict
 from functools import wraps
 from abc import ABC, abstractmethod
 import pickle
@@ -51,21 +52,43 @@ class AbstractSolver(ABC):
         pass
 
 
+def _load_bert(bert_path):
+    bert_config = BertConfig.from_json_file(os.path.join(bert_path, 'bert_config.json'))
+    bert_model = BertModel(bert_config)
+
+    state_dict = torch.load(os.path.join(bert_path, 'pytorch_model.bin'))
+    new_state_dict = OrderedDict()
+    for key, tensor in state_dict.items():
+        if key.startswith('bert'):
+            new_state_dict[key[5:]] = tensor
+        else:
+            new_state_dict[key] = tensor
+    missing_keys, unexpected_keys = bert_model.load_state_dict(new_state_dict, strict=False)
+
+    for key in missing_keys:
+        print('Key {} is missing in the bert checkpoint!'.format(key))
+    for key in unexpected_keys:
+        print('Key {} is unexpected in the bert checkpoint!'.format(key))
+
+    bert_model.eval()
+    return bert_model
+
+
 class BertEmbedder(object):
     """
     Embedding Wrapper on Bert Multilingual Cased
     """
 
     def __init__(self):
-        self.model_file = "./data/bert-base-multilingual-cased.tar.gz"
-        self.vocab_file = "./data/bert-base-multilingual-cased-vocab.txt"
+        self.model_file = "data/"
+        self.vocab_file = "data/vocab.txt"
         self.model = self.bert_model()
         self.tokenizer = self.bert_tokenizer()
         self.embedding_matrix = self.get_bert_embed_matrix()
 
     @singleton
     def bert_model(self):
-        model = BertModel.from_pretrained(self.model_file).eval()
+        model = _load_bert(self.model_file)
         return model
 
     @singleton

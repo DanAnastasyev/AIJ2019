@@ -68,7 +68,10 @@ class Solver(BertEmbedder):
             error_word = process.extractOne(solution[0], words)[0]
             for word in words:
                 if word != error_word and word not in self.representatives:
-                    self.representatives[word] = self.token_embedding([word])
+                    if not word:
+                        self.representatives[word] = np.zeros(768)
+                    else:
+                        self.representatives[word] = self.token_embedding([word])
             for correct in solution:
                 if correct not in self.representatives:
                     self.representatives[correct] = self.token_embedding([correct])
@@ -76,7 +79,7 @@ class Solver(BertEmbedder):
     def save(self, path="data/models/solver7.pkl"):
         with open(path, "wb") as f:
             pickle.dump(self.representatives, f)
-    
+
     def load(self, path="data/models/solver7.pkl"):
         with open(path, "rb") as f:
             self.representatives = pickle.load(f)

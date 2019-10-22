@@ -54,10 +54,6 @@ class Evaluation(object):
             solver14.Solver(),
             solver15.Solver(),
             solver16.Solver(),
-            # solver19.Solver(),
-            # solver19.Solver(),
-            # solver19.Solver(),
-            # solver19.Solver(),
             solver17.Solver(train_size=0.9),
             solver17.Solver(train_size=0.85),
             solver17.Solver(train_size=0.85),
@@ -171,8 +167,8 @@ class Evaluation(object):
             data = read_config(os.path.join(self.test_path, filename))[:-1]
             task_number = self.classifier.predict(data)
             for i, task in enumerate(data):
-                if i + 1 not in {17, 19, 20}:
-                    continue
+                # if i + 1 not in {17, 18, 19, 20}:
+                #     continue
 
                 start = time.time()
                 task_index, task_type = i + 1, task["question"]["type"]

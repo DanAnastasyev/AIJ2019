@@ -1,13 +1,26 @@
 import re
 import pymorphy2
+import stanfordnlp
+import joblib
+
 from catboost import CatBoostClassifier
 from sklearn.model_selection import train_test_split
+
 from solvers.utils import AbstractSolver
-import joblib
+
+
+def _iterate_subsets(elements):
+    if not elements:
+        yield []
+        return
+    for subset in _iterate_subsets(elements[1:]):
+        element = elements[0]
+        yield [] + subset
+        yield [element] + subset
 
 
 class Solver(AbstractSolver):
-    def __init__(self, seed=42, train_size=0.85):
+    def __init__(self, seed=42, train_size=0.85, models_dir='data/stanfordnlp_resources/'):
         self.has_model = False
         self.is_train_task = False
         self.morph = pymorphy2.MorphAnalyzer()
@@ -15,10 +28,53 @@ class Solver(AbstractSolver):
         self.n2pos = [None, ]
         self.train_size = train_size
         self.seed = seed
+        self._pipeline = stanfordnlp.Pipeline(lang='ru', models_dir=models_dir)
+
         self.model = CatBoostClassifier(loss_function="Logloss",
                                    eval_metric='Accuracy',
                                    use_best_model=True, random_seed=self.seed)
         super().__init__(seed)
+
+    @staticmethod
+    def _convert_sentence(sentence):
+        result_sent, positions = '', []
+        prev_match_end = 0
+        for match in re.finditer('\(\d+\)', sentence):
+            result_sent += sentence[prev_match_end: match.start()].strip() + ' '
+            positions.append(len(result_sent) - 1)
+            prev_match_end = match.end()
+
+        result_sent += sentence[prev_match_end:].strip()
+        return result_sent, positions
+
+    @staticmethod
+    def _get_sentence(task):
+        task_text = ''
+        for sent in task['text'].split('.'):
+            sent = sent.strip() + '. '
+            if re.search('\(\d+\)', sent):
+                task_text += sent
+        print(task_text.strip())
+        return task_text.strip()
+
+    def _find_best_positions(self, sentence, positions):
+        best_positions, best_score = ["1"], -100
+        for subset in _iterate_subsets(positions):
+            sent_with_punct = ''
+            prev_position = 0
+            for position in subset:
+                sent_with_punct += sentence[prev_position: position] + ','
+                prev_position = position
+            sent_with_punct += sentence[prev_position:]
+
+            doc = self._pipeline(sent_with_punct)
+            score = doc.conll_file.sents[0][0][-1]
+
+            if score > best_score:
+                best_positions = subset
+                best_score = score
+
+        return [str(positions.index(position) + 1) for position in best_positions]
 
     def get_placeholder(self, token):
         if len(token) < 5 and token[0] == '(' and token[-1] == ')':
@@ -101,7 +157,23 @@ class Solver(AbstractSolver):
         self.model = self.model.fit(X_train, Y_train, cat_features, eval_set=(X_dev, Y_dev))
         self.has_model = True
 
+    def _predict_with_parser(self, task):
+        sentence, positions = self._convert_sentence(self._get_sentence(task))
+
+        if len(positions) > 5:
+            return
+
+        assert task['question']['type'] == 'multiple_choice'
+        assert len(task['question']['choices']) == len(positions)
+        assert [int(choice['id']) == i + 1 for i, choice in enumerate(task['question']['choices'])]
+
+        return self._find_best_positions(sentence, positions)
+
     def predict_from_model(self, task):
+        pred = self._predict_with_parser(task)
+        if pred:
+            return pred
+
         self.is_train_task = False
         X, y = self.parse_task(task)
         pred = self.model.predict(X)
