@@ -163,9 +163,9 @@ class Solver(AbstractSolver):
         if len(positions) > 5:
             return
 
-        assert task['question']['type'] == 'multiple_choice'
-        assert len(task['question']['choices']) == len(positions)
-        assert [int(choice['id']) == i + 1 for i, choice in enumerate(task['question']['choices'])]
+        # assert task['question']['type'] == 'multiple_choice'
+        # assert len(task['question']['choices']) == len(positions)
+        # assert [int(choice['id']) == i + 1 for i, choice in enumerate(task['question']['choices'])]
 
         return self._find_best_positions(sentence, positions)
 
