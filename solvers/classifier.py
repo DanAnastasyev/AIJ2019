@@ -10,7 +10,7 @@ import os
 from utils import read_config, load_pickle, save_pickle
 
 
-class Solver(object):
+class SubSolver(object):
     """
     Классификатор между заданиями.
     Работает на Tfidf векторах и мультиклассовом SVM.
@@ -51,42 +51,41 @@ class Solver(object):
     >>> clf.load("clf.pickle")
     """
 
-    def __init__(self, seed=42, ngram_range=(1, 3)):
+    def __init__(self, t='text', seed=42, ngram_range=(1, 3)):
         self.seed = seed
         self.ngram_range = ngram_range
         self.vectorizer = TfidfVectorizer(ngram_range=ngram_range)
         self.clf = LinearSVC(multi_class='ovr')
         self.init_seed()
         self.word_tokenizer = ToktokTokenizer()
+        self.type = t
 
     def init_seed(self):
         np.random.seed(self.seed)
         random.seed(self.seed)
-
-    def predict(self, task):
-        return self.predict_from_model(task)
 
     def fit(self, tasks):
         texts = []
         classes = []
         for data in tasks:
             for task in data:
-                idx = int(task["id"])
-                text = "{} {}".format(" ".join(self.word_tokenizer.tokenize(task['text'])), task['question']['type'])
-                texts.append(text)
-                classes.append(idx)
-        vectors = self.vectorizer.fit_transform(texts)
+                if task['question']['type'] == self.type:
+                    idx = int(task["id"])
+                    text = " ".join(self.word_tokenizer.tokenize(task['text']))
+                    texts.append(text)
+                    classes.append(idx)
         classes = np.array(classes)
         self.classes = np.unique(classes)
-        self.clf.fit(vectors, classes)
+        if len(self.classes) > 1:
+            vectors = self.vectorizer.fit_transform(texts)
+            self.clf.fit(vectors, classes)
         return self
 
-    def predict_from_model(self, task):
-        texts = []
-        for task_ in task:
-            text = "{} {}".format(" ".join(self.word_tokenizer.tokenize(task_['text'])), task_['question']['type'])
-            texts.append(text)
-        return self.clf.predict(self.vectorizer.transform(texts))
+    def predict_one(self, task):
+        if len(self.classes) == 1:
+            return self.classes[0]
+        text = " ".join(self.word_tokenizer.tokenize(task['text']))
+        return self.clf.predict(self.vectorizer.transform([text]))[0]
 
     def fit_from_dir(self, dir_path):
         tasks = []
@@ -102,3 +101,20 @@ class Solver(object):
 
     def save(self, path):
         save_pickle(self, path)
+
+
+class Solver:
+    def __init__(self, seed=42, ngram_range=(1, 3)):
+        self.seed = seed
+        self.ngram_range = ngram_range
+        self.clfs = {t: SubSolver(t, seed, ngram_range) for t in ('text', 'choice', 'multiple_choice', 'matching')}
+    
+    def fit(self, tasks):
+        for el in self.clfs.values():
+            el.fit(tasks)
+    
+    def predict(self, tasks):
+        res = []
+        for task in tasks:
+            res.append(self.clfs[task['question']['type']].predict_one(task))
+        return res
