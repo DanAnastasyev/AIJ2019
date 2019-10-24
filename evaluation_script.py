@@ -7,6 +7,7 @@ from collections import defaultdict
 from utils import *
 from solvers import *
 
+RETRAIN = True
 
 def zero_if_exception(scorer):
     def new_scorer(*args, **kwargs):
@@ -37,6 +38,7 @@ class Evaluation(object):
         self.secondary_scores = []
         self.task_scores = defaultdict(Score)
         self.classifier = classifier.Solver()
+        self.clf_fitting()
         self.solvers = [
             solver1.Solver(),
             solver2.Solver(),
@@ -72,7 +74,6 @@ class Evaluation(object):
         else:
             self.time_limit_is_ok = False
             print("TIMEOUT: Some solvers fit longer than 10m!")
-        self.clf_fitting()
 
     def solver_fitting(self):
         time_limit_is_observed = True
@@ -80,12 +81,19 @@ class Evaluation(object):
             start = time.time()
             solver_index = i + 1
             train_tasks = load_tasks(self.train_path, task_num=solver_index)
-            if hasattr(solver, "load"):
+            trained = False
+            if RETRAIN or not hasattr(solver, "load"):
+                try:
+                    print("Fitting Solver {}...".format(solver_index))
+                    solver.fit(train_tasks)
+                    if hasattr(solver, "save"):
+                        solver.save("data/models/solver{}.pkl".format(solver_index))
+                    trained = True
+                except:
+                    pass
+            if not trained:
                 print("Loading Solver {}".format(solver_index))
                 solver.load("data/models/solver{}.pkl".format(solver_index))
-            else:
-                print("Fitting Solver {}...".format(solver_index))
-                solver.fit(train_tasks)
             duration = time.time() - start
             if duration > 60:
                 time_limit_is_observed = False
@@ -172,9 +180,14 @@ class Evaluation(object):
 
                 start = time.time()
                 task_index, task_type = i + 1, task["question"]["type"]
-                print("Predicting task {} ({})...".format(task_index, task_number[i] - 1))
+                print("Predicting task {} ({})...".format(task_index, task_number[i]))
                 y_true = task["solution"]
-                prediction = self.solvers[task_number[i] - 1].predict_from_model(task)
+                prediction = ''
+                try:
+                    prediction = self.solvers[task_number[i] - 1].predict_from_model(task)
+                    print('Classifier failed')
+                except:
+                    pass
                 if task_type == "matching":
                     score = self.get_matching_score(y_true, prediction)
                     self.task_scores[task_index].max_score += len(y_true['correct'])
