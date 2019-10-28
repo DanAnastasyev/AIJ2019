@@ -1,193 +1,264 @@
-from ufal.udpipe import Model, Pipeline
-from difflib import SequenceMatcher
-from string import punctuation
+# coding: utf-8
+
+import attr
+import json
+import numpy as np
+import os
 import pymorphy2
 import random
 import re
-import sys
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+from string import punctuation
+from torch.utils.data import DataLoader
+from transformers import BertModel, BertTokenizer, BertConfig
+from transformers.optimization import AdamW, WarmupLinearSchedule
+
+from solvers.torch_utils import ModelTrainer, Field, BatchCollector, F1ScoreCounter, AccuracyCounter
 
 
-def get_gerund(features):
-    """деепричастие """
-    hypothesys = []
+_SPACES_FIX_PATTERN = re.compile('\s+')
 
-    for feature in features:
-        for row in feature:
-            if row[4] == "VERB":
-                if "VerbForm=Conv" in row[5]:
-                    hypothesys.append(" ".join([row[2] for row in feature]))
-
-    return hypothesys
-
-def get_indirect_speech(features):
-    """ косвенная речь """
-    hypothesys = []
-    for feature in features:
-        for row in feature:
-            if row[8] == '1':
-                hypothesys.append(" ".join([row[2] for row in feature]))
-    return hypothesys
-
-def get_app(features):
-    """ Приложение """
-    hypothesys = []
-    for feature in features:
-        for row1, row2, row3 in zip(feature, feature[1:], feature[2:]):
-            if row1[2] == "«" and row3[2] == "»" and row2[1] == '1':
-                hypothesys.append(" ".join([row[2] for row in feature]))
-            if "«" in row1[2]:
-                if row1[2][1:][0].isupper():
-                    hypothesys.append(" ".join([row[2] for row in feature]))
-    return hypothesys
-
-def get_predicates(features):
-    """ связь подлежащее сказуемое root + subj = number """
-    hypothesys = set()
-
-    for feature in features:
-        head, number = None, None
-        for row in feature:
-            if row[7] == 'root':
-                head = row[0]
-                for s in row[5].split('|'):
-                    if "Number" in s:
-                        number = s.replace("Number=", "")
-        for row in feature:
-            row_number = None
-            for s in row[5].split('|'):
-                if "Number" in s:
-                    row_number = s.replace("Number=", "")
-            if row[0] == head and number != row_number:
-                hypothesys.add(" ".join([row[2] for row in feature]))
-    return hypothesys
-
-def get_clause(features):
-    """ сложные предложения """
-    hypothesys = set()
-    for feature in features:
-        for row in feature:
-            if row[3] == 'который':
-                hypothesys.add(" ".join([row[2] for row in feature]))
-    return hypothesys
+_ERRORS = [
+    'деепричастный оборот',
+    'косвенный речь',
+    'несогласованный приложение',
+    'однородный член',
+    'причастный оборот',
+    'связь подлежащее сказуемое',
+    'сложноподчинённый',
+    'сложный',
+    'соотнесённость глагольный форма',
+    'форма существительное',
+    'числительное',
+    'None'
+]
 
 
-def get_participle(features):
-    """причастие """
-    hypothesys = []
-    for feature in features:
-        for row in feature:
-            if row[4] == "VERB":
-                if "VerbForm=Part" in row[5]:
-                    hypothesys.append(" ".join([row[2] for row in feature]))
-    return hypothesys
-
-def get_verbs(features):
-    """ вид и время глаголов """
-    hypothesys = set()
-    for feature in features:
-        head, aspect, tense = None, None, None
-        for row in feature:
-            if row[7] == 'root':
-                # head = row[0]
-                for s in row[5].split('|'):
-                    if "Aspect" in s:
-                        aspect = s.replace("Aspect=", "")
-                    if "Tense" in s:
-                        tense = s.replace("Tense=", "")
-
-        for row in feature:
-            row_aspect, row_tense = None, None
-            for s in row[5].split('|'):
-                if "Aspect" in s:
-                    row_aspect = s.replace("Aspect=", "")
-            for s in row[5].split('|'):
-                if "Tense" in s:
-                    row_tense = s.replace("Tense=", "")
-            if row[4] == "VERB" and row_aspect != aspect: # head ?
-                hypothesys.add(" ".join([row[2] for row in feature]))
-
-            if row[4] == "VERB" and row_tense != tense:
-                hypothesys.add(" ".join([row[2] for row in feature]))
-    return hypothesys
-
-def get_nouns(features):
-    """ формы существительных ADP + NOUN"""
-    hypothesys = set()
-    apds = ["благодаря", "согласно", "вопреки", "подобно", "наперекор",
-            "наперерез", "ввиду", "вместе", "наряду", "по"]
-    for feature in features:
-        for row1, row2 in zip(feature, feature[1:]):
-            if row1[3] in apds:
-                if row2[4] == 'NOUN':
-                    hypothesys.add(" ".join([row[2] for row in feature]))
-    return hypothesys
-
-def get_numerals(features):
-    hypothesys = []
-    for feature in features:
-            for row in feature:
-                if row[4] == "NUM":
-                    hypothesys.append(" ".join([row[2] for row in feature]))
-    return hypothesys
+def init_bert(bert_path):
+    bert_config = BertConfig.from_json_file(os.path.join(bert_path, 'bert_config.json'))
+    return BertModel(bert_config)
 
 
-def get_homogeneous(features):
-    hypothesys = set()
-    for feature in features:
-        sent = " ".join([token[2] for token in feature]).lower()
-        for double_conj in ["если не", "не столько", "не то чтобы"]:
-            if double_conj in sent:
-                hypothesys.add(sent)
-    return hypothesys
+def load_bert(bert_path):
+    bert_model = init_bert(bert_path)
+
+    state_dict = torch.load(os.path.join(bert_path, 'pytorch_model.bin'))
+    new_state_dict = OrderedDict()
+    for key, tensor in state_dict.items():
+        if key.startswith('bert'):
+            new_state_dict[key[5:]] = tensor
+        else:
+            new_state_dict[key] = tensor
+    missing_keys, unexpected_keys = bert_model.load_state_dict(new_state_dict, strict=False)
+
+    for key in missing_keys:
+        print('Key {} is missing in the bert checkpoint!'.format(key))
+    for key in unexpected_keys:
+        print('Key {} is unexpected in the bert checkpoint!'.format(key))
+
+    bert_model.eval()
+    return bert_model
+
+
+def load_bert_tokenizer(bert_path):
+    return BertTokenizer.from_pretrained(os.path.join(bert_path, 'vocab.txt'), do_lower_case=False)
+
+
+@attr.s(frozen=True)
+class Example(object):
+    text = attr.ib()
+    token_ids = attr.ib()
+    segment_ids = attr.ib()
+    mask = attr.ib()
+    error_type = attr.ib()
+    error_type_id = attr.ib()
+
+    def __len__(self):
+        return len(self.token_ids)
+
+
+def get_examples_from_task(task, solver, tokenizer):
+    choices, conditions = solver.parse_task(task)
+    if 'correct_variants' in task['solution']:
+        answers = task['solution']['correct_variants'][0]
+    else:
+        answers = task['solution']['correct']
+
+    choice_index_to_error_type = {
+        int(answers[option]) - 1: conditions[option_index]
+        for option_index, option in enumerate(sorted(answers))
+    }
+    choice_index_to_error_type = {
+        choice_index: choice_index_to_error_type.get(choice_index, _ERRORS[-1])
+        for choice_index, choice in enumerate(choices)
+    }
+
+    assert len(answers) == sum(1 for error_type in choice_index_to_error_type.values() if error_type != _ERRORS[-1])
+
+    for choice_index, choice in enumerate(choices):
+        error_type = choice_index_to_error_type[choice_index]
+
+        text = _SPACES_FIX_PATTERN.sub(' ', choices[choice_index]['text'])
+
+        tokenization = tokenizer.encode_plus(text, add_special_tokens=True)
+        assert len(tokenization['input_ids']) == len(tokenization['token_type_ids'])
+
+        yield Example(
+            text=text,
+            token_ids=tokenization['input_ids'],
+            segment_ids=tokenization['token_type_ids'],
+            mask=[1] * len(tokenization['input_ids']),
+            error_type=error_type,
+            error_type_id=_ERRORS.index(error_type)
+        )
+
+
+def _read_examples(data_path, solver, tokenizer):
+    examples = []
+    for path in os.listdir(data_path):
+        with open(os.path.join(data_path, path)) as f:
+            for task in json.load(f):
+                if int(task['id']) == 8:
+                    examples.extend(get_examples_from_task(task, solver, tokenizer))
+
+    return examples
+
+
+def _get_batch_collector(device, is_train=True):
+    if is_train:
+        vector_fields = [Field('error_type_id', torch.long)]
+    else:
+        vector_fields = []
+
+    return BatchCollector(
+        matrix_fields=[
+            Field('token_ids', np.int64),
+            Field('segment_ids', np.int64),
+            Field('mask', np.int64),
+        ],
+        vector_fields=vector_fields,
+        device=device
+    )
+
+
+class Classifier(nn.Module):
+    def __init__(self, bert, bert_output_dim=768):
+        super(Classifier, self).__init__()
+
+        self._bert = bert
+        self._dropout = nn.Dropout(0.3)
+        self._predictor = nn.Linear(bert_output_dim, len(_ERRORS))
+
+    def forward(self, batch):
+        outputs, pooled_outputs = self._bert(
+            input_ids=batch['token_ids'],
+            attention_mask=batch['mask'],
+            token_type_ids=batch['segment_ids'],
+        )
+
+        status_logits = self._predictor(self._dropout(pooled_outputs))
+
+        loss = 0.
+        if 'error_type_id' in batch:
+            loss = F.cross_entropy(status_logits, batch['error_type_id'])
+
+        return {
+            'error_type_logits': status_logits,
+            'loss': loss
+        }
+
+
+class ClassifierTrainer(ModelTrainer):
+    def on_epoch_begin(self, *args, **kwargs):
+        super(ClassifierTrainer, self).on_epoch_begin(*args, **kwargs)
+
+        self._f1_scores = [
+            F1ScoreCounter(str(i), compact=True) for i in range(len(_ERRORS) - 1)
+        ]
+        self._accuracies = [
+            AccuracyCounter(),
+            AccuracyCounter(masked_values=[len(_ERRORS) - 1])
+        ]
+
+    def on_epoch_end(self):
+        info = super(ClassifierTrainer, self).on_epoch_end()
+
+        return '{}, {}'.format(info, ', '.join(str(score) for score in self._f1_scores + self._accuracies))
+
+    def forward_pass(self, batch):
+        outputs = self._model(batch)
+
+        predictions = outputs['error_type_logits'].argmax(-1)
+        assert predictions.shape == batch['error_type_id'].shape
+
+        for i in range(len(_ERRORS) - 1):
+            self._f1_scores[i].update(predictions == i, batch['error_type_id'] == i)
+
+        self._accuracies[0].update(predictions, batch['error_type_id'])
+        self._accuracies[1].update(predictions, batch['error_type_id'])
+
+        info = ', '.join(str(score) for score in self._f1_scores + self._accuracies)
+        return outputs['loss'], info
+
+
+def _pack_model(model_path):
+    checkpoint = torch.load(model_path)
+    torch.save({'model': checkpoint['model']}, model_path)
+
+
+def _fit_classifier(train_examples, test_examples):
+    use_cuda = torch.cuda.is_available()
+    device = torch.device('cuda:0' if use_cuda else 'cpu')
+
+    batch_collector = _get_batch_collector(device)
+
+    train_batch_size, test_batch_size = 32, 32
+    epoch_count = 10
+
+    bert = load_bert('data/')
+    model = Classifier(bert, bert_output_dim=768).to(device)
+
+    train_loader = DataLoader(
+        train_examples, batch_size=train_batch_size,
+        shuffle=True, collate_fn=batch_collector
+    )
+    test_loader = DataLoader(
+        test_examples, batch_size=test_batch_size,
+        shuffle=False, collate_fn=batch_collector
+    )
+
+    print(next(iter(train_loader)))
+
+    num_total_steps = int(len(train_examples) / train_batch_size * epoch_count)
+    num_warmup_steps = int(num_total_steps * 0.1)
+
+    optimizer = AdamW(model.parameters(), lr=1e-5, correct_bias=False)
+    scheduler = WarmupLinearSchedule(optimizer, warmup_steps=num_warmup_steps, t_total=num_total_steps)
+
+    model_path = 'data/models/solver8.pt'
+    trainer = ClassifierTrainer(
+        model, optimizer, scheduler, use_tqdm=True, model_path=model_path
+    )
+    trainer.fit(
+        train_iter=train_loader, train_batches_per_epoch=int(len(train_examples) / train_batch_size),
+        epochs_count=epoch_count, val_iter=test_loader,
+        val_batches_per_epoch=int(len(test_examples) / test_batch_size)
+    )
+    _pack_model(model_path)
 
 
 class Solver():
-
-    def __init__(self, seed=42):
+    def __init__(self):
+        self._model = None
+        self._tokenizer = None
         self.morph = pymorphy2.MorphAnalyzer()
-        self.categories = set()
-        self.has_model = True
-        self.model = Model.load("data/udpipe_syntagrus.model")
-        self.process_pipeline = Pipeline(self.model, 'tokenize', Pipeline.DEFAULT, Pipeline.DEFAULT, 'conllu')
-        self.seed = seed
-        self.label_dict = {
-            'деепричастный оборот': "get_gerund",
-            'косвенный речь': "get_indirect_speech",
-            'несогласованный приложение': "get_app",
-            'однородный член': "get_homogeneous",
-            'причастный оборот': "get_participle",
-            'связь подлежащее сказуемое': "get_predicates",
-            'сложноподчинённый': "get_clause",
-            'сложный': "get_clause",
-            'соотнесённость глагольный форма': "get_verbs",
-            'форма существительное': "get_nouns",
-            'числительное': "get_numerals"
-        }
-        self.init_seed()
 
-    def init_seed(self):
-        return random.seed(self.seed)
-
-    def get_syntax(self, text):
-        processed = self.process_pipeline.process(text)
-        content = [l for l in processed.split('\n') if not l.startswith('#')]
-        tagged = [w.split('\t') for w in content if w]
-        return tagged
-
-    def tokens_features(self, some_sent):
-
-        tagged = self.get_syntax(some_sent)
-        features = []
-        for token in tagged:
-            _id, token, lemma, pos, _, grammar, head, synt, _, _, = token #tagged[n]
-            capital, say = "0", "0"
-            if lemma[0].isupper():
-                    capital = "1"
-            if lemma in ["сказать", "рассказать", "спросить", "говорить"]:
-                    say = "1"
-            feature_string = [_id, capital, token, lemma, pos, grammar, head, synt, say]
-            features.append(feature_string)
-        return features
+        use_cuda = torch.cuda.is_available()
+        self._device = torch.device('cuda:0' if use_cuda else 'cpu')
+        self._batch_collector = _get_batch_collector(self._device, is_train=False)
 
     def normalize_category(self, cond):
         """ {'id': 'A', 'text': 'ошибка в построении сложного предложения'} """
@@ -203,71 +274,20 @@ class Solver():
                     "предлог", "видовременный", "временной"
                 ]:
                 norm_cat += lemma + ' '
-        self.categories.add(norm_cat[:-1])
         return norm_cat
 
     def parse_task(self, task):
-
         assert task["question"]["type"] == "matching"
 
         conditions = task["question"]["left"]
-        choices = task["question"]["choices"]
+        normalized_conditions = [self.normalize_category(cond).rstrip() for cond in conditions]
 
-        good_conditions = []
-        X = []
-        for cond in conditions:  # LEFT
-            good_conditions.append(self.normalize_category(cond))
+        choices = []
+        for choice in task["question"]["choices"]:
+            choice['text'] = re.sub("[0-9]\\s?\)", "", choice["text"])
+            choices.append(choice)
 
-        for choice in choices:
-            choice = re.sub("[0-9]\\s?\)", "", choice["text"])
-            X.append(choice)
-        return X, choices, good_conditions
-
-    def match_choices(self, label2hypothesys, choices):
-        final_pred_dict = {}
-        for key, value in label2hypothesys.items():
-            if len(value) == 1:
-                variant = list(value)[0]
-                variant = variant.replace(' ,', ',')
-                for choice in choices:
-                    ratio = SequenceMatcher(None, variant, choice["text"]).ratio()
-                    if ratio > 0.9:
-                        final_pred_dict[key] = choice["id"]
-                        choices.remove(choice)
-
-        for key, value in label2hypothesys.items():
-            if key not in final_pred_dict.keys():
-                variant = []
-                for var in value:
-                    for choice in choices:
-                        ratio = SequenceMatcher(None, var, choice["text"]).ratio()
-                        if ratio > 0.9:
-                            variant.append(var)
-                if variant:
-                    for choice in choices:
-                        ratio = SequenceMatcher(None, variant[0], choice["text"]).ratio()
-                        if ratio > 0.9:
-                            final_pred_dict[key] = choice["id"]
-                            choices.remove(choice)
-                else:
-                    variant = [choice for choice in choices]
-                    if variant:
-                        final_pred_dict[key] = variant[0]["id"]
-                        for choice in choices:
-                            ratio = SequenceMatcher(None, variant[0]["text"], choice["text"]).ratio()
-                            if ratio > 0.9:
-                                choices.remove(choice)
-
-        for key, value in label2hypothesys.items():
-            if key not in final_pred_dict.keys():
-                variant = [choice for choice in choices]
-                if variant:
-                    final_pred_dict[key] = variant[0]["id"]
-                    for choice in choices:
-                        ratio = SequenceMatcher(None, variant[0]["text"], choice["text"]).ratio()
-                        if ratio > 0.9:
-                            choices.remove(choice)
-        return final_pred_dict
+        return choices, normalized_conditions
 
     def predict_random(self, task):
         """ Test a random choice model """
@@ -279,39 +299,158 @@ class Solver():
         return pred
 
     def predict(self, task):
-        if not self.has_model:
-            return self.predict_random(task)
-        else:
-            return self.predict_from_model(task)
+        return self.predict_from_model(task)
 
     def fit(self, tasks):
         pass
 
-    def load(self, path="data/models/solver8.pkl"):
-        pass
+    def load(self, path="data/models/solver8.pt", bert_path='data'):
+        self._tokenizer = load_bert_tokenizer(bert_path)
+
+        model_checkpoint = torch.load('data/models/solver8.pt', map_location=self._device)
+        self._model = Classifier(init_bert(bert_path))
+        self._model.load_state_dict(model_checkpoint['model'])
+        self._model.to(self._device)
+        self._model.eval()
 
     def save(self, path="data/models/solver8.pkl"):
         pass
 
     def predict_from_model(self, task):
-        x, choices, conditions = self.parse_task(task)
-        all_features = []
-        for row in x:
-            all_features.append(self.tokens_features(row))
+        choices, conditions = self.parse_task(task)
+        examples = []
+        for choice in choices:
+            text = _SPACES_FIX_PATTERN.sub(' ', choice['text'])
+            tokenization = self._tokenizer.encode_plus(text, add_special_tokens=True)
 
-        label2hypothesys = {}
-        for label in self.label_dict.keys():
-            func = self.label_dict[label.rstrip()]
-            hypotesis = getattr(sys.modules[__name__], func)(all_features)
-            label2hypothesys[label] = hypotesis
+            examples.append(Example(
+                text=text,
+                token_ids=tokenization['input_ids'],
+                segment_ids=tokenization['token_type_ids'],
+                mask=[1] * len(tokenization['input_ids']),
+                error_type=None,
+                error_type_id=None
+            ))
 
-        final_pred_dict = self.match_choices(label2hypothesys, choices)
+        model_inputs = self._batch_collector(examples)
+
+        target_condition_indices = [_ERRORS.index(condition) for condition in conditions]
 
         pred_dict = {}
-        for cond, key in zip(conditions, ["A", "B", "C", "D", "E"]):
-            cond = cond.rstrip()
-            try:
-                pred_dict[key] = final_pred_dict[cond]
-            except KeyError:
-                pred_dict[key] = "1"
+        with torch.no_grad():
+            model_prediction = self._model(model_inputs)
+            model_prediction = model_prediction['error_type_logits'][:, target_condition_indices]
+            model_prediction = model_prediction.argmax(0)
+
+            for i, condition in enumerate(task['question']['left']):
+                pred_dict[condition['id']] = choices[model_prediction[i]]['id']
+
         return pred_dict
+
+
+def train():
+    bert_tokenizer = load_bert_tokenizer('data/')
+
+    solver = Solver()
+    train_examples = _read_examples('public_set/train', solver, bert_tokenizer)
+    test_examples = _read_examples('public_set/test', solver, bert_tokenizer)
+
+    train_examples = [example for example in train_examples if example not in test_examples]
+
+    print('Examples:')
+    for example in train_examples[0:100:10]:
+        print(example)
+
+    print('Examples count:', len(train_examples))
+    for idx, error in enumerate(_ERRORS):
+        print('Examples for error {}: {}'.format(error, sum(1 for ex in train_examples if ex.error_type_id == idx)))
+
+    _fit_classifier(train_examples, test_examples)
+
+
+if __name__ == "__main__":
+    # train()
+
+    _pack_model('data/models/solver8.pt')
+
+    solver = Solver()
+    solver.load()
+
+    print(solver.predict_from_model({
+        "id": "8",
+        "text": "Установите соответствие между грамматическими ошибками и предложениями, в которых они допущены: к каждой позиции первого столбца подберите соответствующую позицию из второго столбца. ГРАММАТИЧЕСКИЕ ОШИБКИ   ПРЕДЛОЖЕНИЯА) нарушение в построении предложения с причастным оборотомБ) неправильное употребление падежной формы существительного с предлогомВ) ошибка в построении предложения с деепричастным оборотомГ) нарушение в построении предложения с однородными членамиД) нарушение связи между подлежащим и сказуемым в предложении       1) Автор рассказал об изменениях в книге, готовящейся им к переизданию.2) Пони из местного цирка по вечерам катало детей.3) Мальчишка, катавшийся на велосипеде и который с него упал, сидел рядом с мамой, прикрывая разбитое колено.4) На небе не было ни одного облачка, но в воздухе чувствовался избыток влаги.5) Родители требовали, чтобы я по приезду отправил им подробный отчёт и рассказал всё в мельчайших подробностях.6) В народных представлениях власть повелевать ветрами приписывается различным божествам и мифологическим персонажам.7) Я имею поручение как от судьи, так равно и от всех наших знакомых примирить вас с приятелем вашим.8) Заглянув на урок, директору представилась интересная картина.9) Беловежская пуща — наиболее крупный остаток реликтового первобытного равнинного леса, который в доисторические времена произрастал на территории Европы. Запишите в ответ цифры, расположив их в порядке, соответствующем буквам: AБВГД     ",
+        "attachments": [],
+        "question": {
+            "type": "matching",
+            "left": [
+                {
+                    "id": "A",
+                    "text": "А) нарушение в построении предложения с причастным оборотом"
+                },
+                {
+                    "id": "B",
+                    "text": "Б) неправильное употребление падежной формы существительного с предлогом"
+                },
+                {
+                    "id": "C",
+                    "text": "В) ошибка в построении предложения с деепричастным оборотом"
+                },
+                {
+                    "id": "D",
+                    "text": "Г) нарушение в построении предложения с однородными членами"
+                },
+                {
+                    "id": "E",
+                    "text": "Д) нарушение связи между подлежащим и сказуемым в предложении       "
+                }
+            ],
+            "choices": [
+                {
+                    "id": "1",
+                    "text": "1) Автор рассказал об изменениях в книге, готовящейся им к переизданию"
+                },
+                {
+                    "id": "2",
+                    "text": "2) Пони из местного цирка по вечерам катало детей"
+                },
+                {
+                    "id": "3",
+                    "text": "3) Мальчишка, катавшийся на велосипеде и который с него упал, сидел рядом с мамой, прикрывая разбитое колено"
+                },
+                {
+                    "id": "4",
+                    "text": "4) На небе не было ни одного облачка, но в воздухе чувствовался избыток влаги"
+                },
+                {
+                    "id": "5",
+                    "text": "5) Родители требовали, чтобы я по приезду отправил им подробный отчёт и рассказал всё в мельчайших подробностях"
+                },
+                {
+                    "id": "6",
+                    "text": "6) В народных представлениях власть повелевать ветрами приписывается различным божествам и мифологическим персонажам"
+                },
+                {
+                    "id": "7",
+                    "text": "7) Я имею поручение как от судьи, так равно и от всех наших знакомых примирить вас с приятелем вашим"
+                },
+                {
+                    "id": "8",
+                    "text": "8) Заглянув на урок, директору представилась интересная картина"
+                },
+                {
+                    "id": "9",
+                    "text": "9) Беловежская пуща — наиболее крупный остаток реликтового первобытного равнинного леса, который в доисторические времена произрастал на территории Европы. "
+                }
+            ]
+        },
+        "solution": {
+            "correct": {
+                "A": "1",
+                "B": "5",
+                "C": "8",
+                "D": "3",
+                "E": "2"
+            }
+        },
+        "score": 5
+    }))

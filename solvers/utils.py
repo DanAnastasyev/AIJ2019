@@ -52,9 +52,13 @@ class AbstractSolver(ABC):
         pass
 
 
-def _load_bert(bert_path):
+def init_bert(bert_path):
     bert_config = BertConfig.from_json_file(os.path.join(bert_path, 'bert_config.json'))
-    bert_model = BertModel(bert_config)
+    return BertModel(bert_config)
+
+
+def load_bert(bert_path):
+    bert_model = init_bert(bert_path)
 
     state_dict = torch.load(os.path.join(bert_path, 'pytorch_model.bin'))
     new_state_dict = OrderedDict()
@@ -74,6 +78,10 @@ def _load_bert(bert_path):
     return bert_model
 
 
+def load_bert_tokenizer(bert_path):
+    return BertTokenizer.from_pretrained(os.path.join(bert_path, 'vocab.txt'), do_lower_case=False)
+
+
 class BertEmbedder(object):
     """
     Embedding Wrapper on Bert Multilingual Cased
@@ -88,12 +96,12 @@ class BertEmbedder(object):
 
     @singleton
     def bert_model(self):
-        model = _load_bert(self.model_file)
+        model = load_bert(self.model_file)
         return model
 
     @singleton
     def bert_tokenizer(self):
-        tokenizer = BertTokenizer.from_pretrained(self.vocab_file, do_lower_case=False)
+        tokenizer = load_bert_tokenizer(self.model_file)
         return tokenizer
 
     @singleton
