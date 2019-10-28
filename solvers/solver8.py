@@ -9,14 +9,15 @@ import random
 import re
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from string import punctuation
 from torch.utils.data import DataLoader
-from transformers import BertModel, BertTokenizer, BertConfig
 from transformers.optimization import AdamW, WarmupLinearSchedule
 
-from solvers.torch_utils import ModelTrainer, Field, BatchCollector, F1ScoreCounter, AccuracyCounter
+from solvers.torch_utils import (
+    ModelTrainer, Field, BatchCollector, F1ScoreCounter, AccuracyCounter,
+    BertMulticlassClassifier, init_bert, load_bert, load_bert_tokenizer
+)
 
 
 _SPACES_FIX_PATTERN = re.compile('\s+')
@@ -35,36 +36,6 @@ _ERRORS = [
     'числительное',
     'None'
 ]
-
-
-def init_bert(bert_path):
-    bert_config = BertConfig.from_json_file(os.path.join(bert_path, 'bert_config.json'))
-    return BertModel(bert_config)
-
-
-def load_bert(bert_path):
-    bert_model = init_bert(bert_path)
-
-    state_dict = torch.load(os.path.join(bert_path, 'pytorch_model.bin'))
-    new_state_dict = OrderedDict()
-    for key, tensor in state_dict.items():
-        if key.startswith('bert'):
-            new_state_dict[key[5:]] = tensor
-        else:
-            new_state_dict[key] = tensor
-    missing_keys, unexpected_keys = bert_model.load_state_dict(new_state_dict, strict=False)
-
-    for key in missing_keys:
-        print('Key {} is missing in the bert checkpoint!'.format(key))
-    for key in unexpected_keys:
-        print('Key {} is unexpected in the bert checkpoint!'.format(key))
-
-    bert_model.eval()
-    return bert_model
-
-
-def load_bert_tokenizer(bert_path):
-    return BertTokenizer.from_pretrained(os.path.join(bert_path, 'vocab.txt'), do_lower_case=False)
 
 
 @attr.s(frozen=True)
@@ -144,33 +115,6 @@ def _get_batch_collector(device, is_train=True):
     )
 
 
-class Classifier(nn.Module):
-    def __init__(self, bert, bert_output_dim=768):
-        super(Classifier, self).__init__()
-
-        self._bert = bert
-        self._dropout = nn.Dropout(0.3)
-        self._predictor = nn.Linear(bert_output_dim, len(_ERRORS))
-
-    def forward(self, batch):
-        outputs, pooled_outputs = self._bert(
-            input_ids=batch['token_ids'],
-            attention_mask=batch['mask'],
-            token_type_ids=batch['segment_ids'],
-        )
-
-        status_logits = self._predictor(self._dropout(pooled_outputs))
-
-        loss = 0.
-        if 'error_type_id' in batch:
-            loss = F.cross_entropy(status_logits, batch['error_type_id'])
-
-        return {
-            'error_type_logits': status_logits,
-            'loss': loss
-        }
-
-
 class ClassifierTrainer(ModelTrainer):
     def on_epoch_begin(self, *args, **kwargs):
         super(ClassifierTrainer, self).on_epoch_begin(*args, **kwargs)
@@ -219,7 +163,7 @@ def _fit_classifier(train_examples, test_examples):
     epoch_count = 10
 
     bert = load_bert('data/')
-    model = Classifier(bert, bert_output_dim=768).to(device)
+    model = BertMulticlassClassifier(bert, class_count=len(_ERRORS), output_name='error_type').to(device)
 
     train_loader = DataLoader(
         train_examples, batch_size=train_batch_size,
@@ -308,7 +252,9 @@ class Solver():
         self._tokenizer = load_bert_tokenizer(bert_path)
 
         model_checkpoint = torch.load('data/models/solver8.pt', map_location=self._device)
-        self._model = Classifier(init_bert(bert_path))
+        self._model = BertMulticlassClassifier(
+            init_bert(bert_path), class_count=len(_ERRORS), output_name='error_type'
+        )
         self._model.load_state_dict(model_checkpoint['model'])
         self._model.to(self._device)
         self._model.eval()
@@ -348,7 +294,7 @@ class Solver():
         return pred_dict
 
 
-def train():
+def _train():
     bert_tokenizer = load_bert_tokenizer('data/')
 
     solver = Solver()
@@ -368,5 +314,90 @@ def train():
     _fit_classifier(train_examples, test_examples)
 
 
+def _test_apply():
+    solver = Solver()
+    solver.load()
+
+    print(solver.predict_from_model({
+        "id": "8",
+        "text": "Установите соответствие между грамматическими ошибками и предложениями, в которых они допущены: к каждой позиции первого столбца подберите соответствующую позицию из второго столбца. ГРАММАТИЧЕСКИЕ ОШИБКИ   ПРЕДЛОЖЕНИЯА) нарушение в построении предложения с причастным оборотомБ) неправильное употребление падежной формы существительного с предлогомВ) ошибка в построении предложения с деепричастным оборотомГ) нарушение в построении предложения с однородными членамиД) нарушение связи между подлежащим и сказуемым в предложении       1) Автор рассказал об изменениях в книге, готовящейся им к переизданию.2) Пони из местного цирка по вечерам катало детей.3) Мальчишка, катавшийся на велосипеде и который с него упал, сидел рядом с мамой, прикрывая разбитое колено.4) На небе не было ни одного облачка, но в воздухе чувствовался избыток влаги.5) Родители требовали, чтобы я по приезду отправил им подробный отчёт и рассказал всё в мельчайших подробностях.6) В народных представлениях власть повелевать ветрами приписывается различным божествам и мифологическим персонажам.7) Я имею поручение как от судьи, так равно и от всех наших знакомых примирить вас с приятелем вашим.8) Заглянув на урок, директору представилась интересная картина.9) Беловежская пуща — наиболее крупный остаток реликтового первобытного равнинного леса, который в доисторические времена произрастал на территории Европы. Запишите в ответ цифры, расположив их в порядке, соответствующем буквам: AБВГД     ",
+        "attachments": [],
+        "question": {
+            "type": "matching",
+            "left": [
+                {
+                    "id": "A",
+                    "text": "А) нарушение в построении предложения с причастным оборотом"
+                },
+                {
+                    "id": "B",
+                    "text": "Б) неправильное употребление падежной формы существительного с предлогом"
+                },
+                {
+                    "id": "C",
+                    "text": "В) ошибка в построении предложения с деепричастным оборотом"
+                },
+                {
+                    "id": "D",
+                    "text": "Г) нарушение в построении предложения с однородными членами"
+                },
+                {
+                    "id": "E",
+                    "text": "Д) нарушение связи между подлежащим и сказуемым в предложении       "
+                }
+            ],
+            "choices": [
+                {
+                    "id": "1",
+                    "text": "1) Автор рассказал об изменениях в книге, готовящейся им к переизданию"
+                },
+                {
+                    "id": "2",
+                    "text": "2) Пони из местного цирка по вечерам катало детей"
+                },
+                {
+                    "id": "3",
+                    "text": "3) Мальчишка, катавшийся на велосипеде и который с него упал, сидел рядом с мамой, прикрывая разбитое колено"
+                },
+                {
+                    "id": "4",
+                    "text": "4) На небе не было ни одного облачка, но в воздухе чувствовался избыток влаги"
+                },
+                {
+                    "id": "5",
+                    "text": "5) Родители требовали, чтобы я по приезду отправил им подробный отчёт и рассказал всё в мельчайших подробностях"
+                },
+                {
+                    "id": "6",
+                    "text": "6) В народных представлениях власть повелевать ветрами приписывается различным божествам и мифологическим персонажам"
+                },
+                {
+                    "id": "7",
+                    "text": "7) Я имею поручение как от судьи, так равно и от всех наших знакомых примирить вас с приятелем вашим"
+                },
+                {
+                    "id": "8",
+                    "text": "8) Заглянув на урок, директору представилась интересная картина"
+                },
+                {
+                    "id": "9",
+                    "text": "9) Беловежская пуща — наиболее крупный остаток реликтового первобытного равнинного леса, который в доисторические времена произрастал на территории Европы. "
+                }
+            ]
+        },
+        "solution": {
+            "correct": {
+                "A": "1",
+                "B": "5",
+                "C": "8",
+                "D": "3",
+                "E": "2"
+            }
+        },
+        "score": 5
+    }))
+
+
 if __name__ == "__main__":
-    train()
+    _train()
+    # _test_apply()

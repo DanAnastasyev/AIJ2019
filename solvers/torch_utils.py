@@ -7,8 +7,11 @@ import os
 import shutil
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
+from collections import OrderedDict
 from operator import attrgetter
+from transformers import BertModel, BertTokenizer, BertConfig
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +51,64 @@ class BatchCollector(object):
             batch[field.name] = batchify_vector(attrgetter(field.name), field.dtype).to(self._device)
 
         return batch
+
+
+def init_bert(bert_path):
+    bert_config = BertConfig.from_json_file(os.path.join(bert_path, 'bert_config.json'))
+    return BertModel(bert_config)
+
+
+def load_bert(bert_path):
+    bert_model = init_bert(bert_path)
+
+    state_dict = torch.load(os.path.join(bert_path, 'pytorch_model.bin'))
+    new_state_dict = OrderedDict()
+    for key, tensor in state_dict.items():
+        if key.startswith('bert'):
+            new_state_dict[key[5:]] = tensor
+        else:
+            new_state_dict[key] = tensor
+    missing_keys, unexpected_keys = bert_model.load_state_dict(new_state_dict, strict=False)
+
+    for key in missing_keys:
+        print('Key {} is missing in the bert checkpoint!'.format(key))
+    for key in unexpected_keys:
+        print('Key {} is unexpected in the bert checkpoint!'.format(key))
+
+    bert_model.eval()
+    return bert_model
+
+
+def load_bert_tokenizer(bert_path):
+    return BertTokenizer.from_pretrained(os.path.join(bert_path, 'vocab.txt'), do_lower_case=False)
+
+
+class BertMulticlassClassifier(nn.Module):
+    def __init__(self, bert, class_count, output_name, bert_output_dim=768):
+        super(BertMulticlassClassifier, self).__init__()
+
+        self._bert = bert
+        self._dropout = nn.Dropout(0.3)
+        self._predictor = nn.Linear(bert_output_dim, class_count)
+        self._output_name = output_name
+
+    def forward(self, batch):
+        outputs, pooled_outputs = self._bert(
+            input_ids=batch['token_ids'],
+            attention_mask=batch['mask'],
+            token_type_ids=batch['segment_ids'],
+        )
+
+        status_logits = self._predictor(self._dropout(pooled_outputs))
+
+        loss = 0.
+        if self._output_name + '_id' in batch:
+            loss = F.cross_entropy(status_logits, batch[self._output_name + '_id'])
+
+        return {
+            self._output_name + '_logits': status_logits,
+            'loss': loss
+        }
 
 
 def save_model(model, optimizer, scheduler, model_path):
