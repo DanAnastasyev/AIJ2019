@@ -10,6 +10,6 @@ ENV LANG ru_RU.UTF-8
 
 RUN ln -s /usr/bin/python3 /usr/bin/python
 RUN curl -sL https://github.com/dangerink/udpipe/archive/load_binary.zip -o /tmp/udpipe.zip &&     cd /tmp &&     unzip -qo /tmp/udpipe.zip  &&     cd /tmp/udpipe-load_binary/releases/pypi &&     ./gen.sh 1.2.0.1.0 &&     cd ufal.udpipe &&     python3 setup.py install &&     cd /tmp &&     rm -rf /tmp/udpipe*
-RUN pip3 install numpy==1.17.2 scipy sklearn pandas==0.24.2 nltk==3.2.5 gensim==3.8.0 torch catboost pytorch_pretrained_bert==0.6.2 matplotlib==3.0.3 python-Levenshtein sklearn_crfsuite fastai fuzzywuzzy keras tqdm pymorphy2 summa pymystem3 pymorphy2 pymorphy2-dicts-ru jellyfish flask requests tensorflow git+https://github.com/DanAnastasyev/stanfordnlp
+RUN pip3 install numpy==1.17.2 scipy sklearn pandas==0.24.2 nltk==3.2.5 gensim==3.8.0 torch catboost pytorch_pretrained_bert==0.6.2 matplotlib==3.0.3 python-Levenshtein sklearn_crfsuite fastai fuzzywuzzy keras tqdm pymorphy2 summa pymystem3 pymorphy2 pymorphy2-dicts-ru jellyfish flask requests tensorflow==1.14.0 git+https://github.com/DanAnastasyev/stanfordnlp transformers==2.1.1 attrs==19.1.0 sentencepiece==0.1.83 tf-sentencepiece==0.1.83 tensorflow-hub==0.6.0 razdel==0.4.0
 RUN python -c "import pymystem3.mystem ; pymystem3.mystem.autoinstall()"
 RUN python -c "import nltk; nltk.download('stopwords'); nltk.download('punkt');"
