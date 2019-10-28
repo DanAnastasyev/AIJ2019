@@ -7,7 +7,7 @@ from collections import defaultdict
 from utils import *
 from solvers import *
 
-RETRAIN = True
+RETRAIN = False
 
 def zero_if_exception(scorer):
     def new_scorer(*args, **kwargs):
@@ -47,7 +47,7 @@ class Evaluation(object):
             solver5_local.Solver(),
             solver6.Solver(),
             solver7.Solver(),
-            solver8_local.Solver(),
+            solver8.Solver(),
             solver9.Solver(),
             solver10.Solver(),
             solver10.Solver(),
@@ -175,32 +175,41 @@ class Evaluation(object):
             data = read_config(os.path.join(self.test_path, filename))[:-1]
             task_number = self.classifier.predict(data)
             for i, task in enumerate(data):
-                # if i + 1 not in {17, 18, 19, 20}:
+                # if int(task['id']) not in {8}:
                 #     continue
 
                 start = time.time()
-                task_index, task_type = i + 1, task["question"]["type"]
+                task_index, task_type = int(task['id']), task["question"]["type"]
                 print("Predicting task {} ({})...".format(task_index, task_number[i]))
                 y_true = task["solution"]
-                prediction = ''
-                try:
-                    prediction = self.solvers[task_number[i] - 1].predict_from_model(task)
-                    print('Classifier failed')
-                except:
-                    pass
+                prediction = self.solvers[task_number[i] - 1].predict_from_model(task)
+
                 if task_type == "matching":
                     score = self.get_matching_score(y_true, prediction)
-                    self.task_scores[task_index].max_score += len(y_true['correct'])
+
+                    if "correct_variants" in y_true:
+                        correct_values = y_true["correct_variants"][0]
+                    else:
+                        correct_values = y_true["correct"]
+
+                    max_score = len(correct_values)
                 elif task_index == 16:
                     score = self.get_multiple_score(y_true, prediction)
-                    self.task_scores[task_index].max_score += len(
-                        y_true["correct_variants"][0] if "correct_variants" in y_true else y_true["correct"]
-                    )
+
+                    if "correct_variants" in y_true:
+                        correct_values = y_true["correct_variants"][0]
+                    else:
+                        correct_values = y_true["correct"]
+
+                    max_score = len(correct_values)
                 else:
                     score = self.get_score(y_true, prediction)
-                    self.task_scores[task_index].max_score += 1
+                    max_score = 1
+
                 self.task_scores[task_index].score += score
-                print("Score: {}\nCorrect: {}\nPrediction: {}\n".format(score, y_true, prediction))
+                self.task_scores[task_index].max_score += max_score
+
+                print("Score: {} / {}\nCorrect: {}\nPrediction: {}\n".format(score, max_score, y_true, prediction))
                 predictions.append(score)
                 duration = time.time() - start
                 if duration > 60:
