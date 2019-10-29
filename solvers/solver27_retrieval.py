@@ -46,10 +46,12 @@ class Solver(object):
         self._predefined_problems, problem_embedded_texts = [], []
         for essay in essays:
             for hint in essay['hints']:
+                problem = _REPEATING_SPACE_PATTERN.sub(' ', hint['problem']).strip()
+                problem = problem.split(' ', 1)[1]
                 hint = {
                     'theme': hint['theme'].strip(),
                     'comment': _REPEATING_SPACE_PATTERN.sub(' ', hint['comment']).strip(),
-                    'problem': _REPEATING_SPACE_PATTERN.sub(' ', hint['problem']).strip(),
+                    'problem': problem,
                     'author_position': _REPEATING_SPACE_PATTERN.sub(' ', hint['author_position']).strip(),
                 }
                 problem_embedded_texts.append(self._get_hint_text(hint))
@@ -134,9 +136,20 @@ class Solver(object):
 
         return sentences, preposition, author
 
+    @staticmethod
+    def _get_long_phrases(sentences):
+        long_phrases = []
+        for i, sent in enumerate(sentences):
+            phrase = (([sentences[i - 1]] if i > 0 else [])
+                      + [sent]
+                      + ([sentences[i + 1]] if i + 1 < len(sentences) else []))
+            long_phrases.append(' '.join(phrase))
+        return long_phrases
+
     def _get_best_match(self, sentences, part_embeddings):
         is_best_theme = np.zeros(len(part_embeddings))
 
+        # TODO: Batchify me
         for i, sent in enumerate(sentences):
             cur_text = (([sentences[i - 1]] if i > 0 else [])
                 + [sent]
@@ -153,12 +166,26 @@ class Solver(object):
         return is_best_theme.argmax()
 
     def _extract_problem_sentences(self, sentences, problem_embedding):
-        similarities = []
-        for sentence in sentences:
-            sent_embedding = self._session.run(self._embedded_text, feed_dict={self._text_input: [sentence]})
-            similarities.append(np.dot(sent_embedding, problem_embedding)[0])
+        sent_embeddings = self._session.run(self._embedded_text, feed_dict={self._text_input: sentences})
+        similarities = np.dot(sent_embeddings, problem_embedding)
 
-        return np.argpartition(similarities, kth=-2)[-2:]
+        best_sentence_indices = np.argsort(similarities)[-5:]
+        problem_sentences = []
+        for index in best_sentence_indices:
+            if len(sentences[index].split()) > 6:
+                problem_sentences.append(sentences[index])
+
+        if len(problem_sentences) < 2:
+            long_phrases = self._get_long_phrases(sentences)
+
+            sent_embeddings = self._session.run(self._embedded_text, feed_dict={self._text_input: long_phrases})
+            similarities = np.dot(sent_embeddings, problem_embedding)
+
+            best_indices = np.argpartition(similarities, kth=-2)[-2:]
+            while len(problem_sentences) < 2:
+                problem_sentences.append(long_phrases[best_indices])
+
+        return problem_sentences
 
     def generate(self, text):
         sentences, preposition, author = self._parse_text(text)
@@ -184,13 +211,13 @@ class Solver(object):
             author_name = 'автору'
 
         if problem['comment']:
-            text.append('Он задается вопросом: {}.'.format(problem['comment']))
+            text.append('Это приводит к вопросу: {}.'.format(problem['comment']))
         text.append('\n')
 
         text.extend([
-            'Рассуждая над проблемой, автор приводит два взаимодополняющих примера.',
-            'Он пишет: "{}".'.format(sentences[problem_sentences[0]]),
-            'Его позицию дополнительно подчеркивают такие слова, как: "{}".'.format(sentences[problem_sentences[1]]),
+            'Рассуждая об этом, автор указывает на два взаимодополняющих примера.',
+            'Он пишет: "{}".'.format(problem_sentences[0]),
+            'Эту позицию дополнительно подчеркивают такие слова, как: "{}".'.format(problem_sentences[1]),
             'В итоге авторская позиция ясна: {}\n'.format(problem['author_position']),
             'Откровенно говоря, я не могу уверенно сказать, что сам когда-либо задумывался над данной проблемой. '
             'Но теперь, прочитав данное произведение автора, я могу сказать, что я целиком и полностью согласен с ним. '
@@ -224,7 +251,7 @@ def main():
     import os
 
     with open('predicted_essays.txt', 'w') as f_out:
-        for path in os.listdir('public_set/test/'):
+        for path in os.listdir('public_set/test/')[2:]:
             with open('public_set/test/' + path) as f:
                 for task in json.load(f):
                     if int(task['id']) == 27:
