@@ -49,7 +49,7 @@ class CuttingEdgeStrongGeneralAI(object):
             solver24,
             solver25,
             solver26,
-            solver27
+            solver27_retrieval
         ]
         self.solvers = self.solver_loading(solver_classes)
         self.clf_fitting()
