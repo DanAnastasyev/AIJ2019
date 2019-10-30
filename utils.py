@@ -10,6 +10,8 @@ def rus_tok(text, m = pymorphy2.MorphAnalyzer()):
     toks = text.split()
     return [m.parse(t)[0].normal_form for t in toks if not re.match(reg, t)]
 
+CONVERTER = {'А': 'A', 'Б': 'B', 'В': 'C', 'Г': 'D', 'B': 'C'}
+
 def load_tasks(dir_path, task_num=None):
     tasks, filenames = [], [os.path.join(dir_path, f) for f in os.listdir(dir_path)]
     for filename in filenames:
@@ -18,6 +20,16 @@ def load_tasks(dir_path, task_num=None):
                 dt = f.read().encode('utf-8')
                 data = json.loads(dt)
                 tasks += [d for d in data if 'id' in d and int(d['id']) == task_num]
+    '''
+    for task in tasks:
+        if task['id'] == '26' and 'hint' in task:
+            solution = task['solution']['correct']
+            task['solution']['correct'] = {CONVERTER.get(key, key): value for key, value in solution.items()}
+            task['question']['left'] = {CONVERTER.get(key, key): value for key,value in task['question']['left']}
+            if set(task['question']['left'].keys()) != set('ABCD'):
+                task['skip'] = True
+    tasks = [task for task in tasks if not task.get('skip')]
+    '''
     return tasks
 
 

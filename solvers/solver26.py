@@ -120,9 +120,10 @@ class Solver(BertEmbedder):
         self.corpus, self.types = list(), list()
         for task in tasks:
             letters_to_phrases = self.extract_phrases(task)
+            solution = task['solution']['correct']
             for key in "ABCD":
                 questions = letters_to_phrases[key]
-                answer_number = task["solution"]["correct"][key]
+                answer_number = solution[key]
                 answer = next(
                     answ["text"] for answ in task["question"]["choices"] if
                     answ["id"] == answer_number)

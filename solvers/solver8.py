@@ -298,8 +298,8 @@ def _train():
     bert_tokenizer = load_bert_tokenizer('data/')
 
     solver = Solver()
-    train_examples = _read_examples('public_set/train', solver, bert_tokenizer)
-    test_examples = _read_examples('public_set/test', solver, bert_tokenizer)
+    train_examples = _read_examples('dataset/train', solver, bert_tokenizer)
+    test_examples = _read_examples('dataset/test', solver, bert_tokenizer)
 
     train_examples = [example for example in train_examples if example not in test_examples]
 

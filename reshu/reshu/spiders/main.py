@@ -13,7 +13,7 @@ class MainScraper(scrapy.Spider):
     def parse_test(self, response):
         for problem in response.css('.prob_maindiv'):
             num = problem.css('.prob_nums::text').get()
-            body = problem.css('.pbody')[0].css('p::text').getall()
+            body = problem.css('.pbody')[0].css('p').getall()
             text = problem.css('.probtext').get()
             answer = None
             solution = problem.css('.solution').get()

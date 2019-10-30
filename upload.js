@@ -14,9 +14,11 @@ page.open('https://contest.ai-journey.ru/', function(status) {
         page.evaluate(function() {
             $("[data-target='#submitModal']").click();
         });
-        console.log(page.uploadFile('#inputFile2', '../solution.zip'));
+        console.log(page.uploadFile('#inputFile2', 'solution.zip'));
         setInterval(function () {
-            console.log('Waiting');
+            console.log('Waiting ' + page.evaluate(function () {
+                return $("#submit_progress").text();
+            }));
             var good = page.evaluate(function() {
                 return $("#subm_comp_btn").hasClass("join-button");
             });
