@@ -51,51 +51,23 @@ class Example(object):
         return len(self.token_ids)
 
 
-def get_examples_from_task(task, solver, tokenizer):
-    choices, conditions = solver.parse_task(task)
-    if 'correct_variants' in task['solution']:
-        answers = task['solution']['correct_variants'][0]
-    else:
-        answers = task['solution']['correct']
-
-    choice_index_to_error_type = {
-        int(answers[option]) - 1: conditions[option_index]
-        for option_index, option in enumerate(sorted(answers))
-    }
-    choice_index_to_error_type = {
-        choice_index: choice_index_to_error_type.get(choice_index, _ERRORS[-1])
-        for choice_index, choice in enumerate(choices)
-    }
-
-    assert len(answers) == sum(1 for error_type in choice_index_to_error_type.values() if error_type != _ERRORS[-1])
-
-    for choice_index, choice in enumerate(choices):
-        error_type = choice_index_to_error_type[choice_index]
-
-        text = _SPACES_FIX_PATTERN.sub(' ', choices[choice_index]['text'])
-
-        tokenization = tokenizer.encode_plus(text, add_special_tokens=True)
-        assert len(tokenization['input_ids']) == len(tokenization['token_type_ids'])
-
-        yield Example(
-            text=text,
-            token_ids=tokenization['input_ids'],
-            segment_ids=tokenization['token_type_ids'],
-            mask=[1] * len(tokenization['input_ids']),
-            error_type=error_type,
-            error_type_id=_ERRORS.index(error_type)
-        )
+@attr.s(frozen=True)
+class TrainConfig(object):
+    learning_rate = attr.ib(default=1e-5)
+    train_batch_size = attr.ib(default=32)
+    test_batch_size = attr.ib(default=32)
+    epoch_count = attr.ib(default=10)
+    warm_up = attr.ib(default=0.1)
 
 
-def _read_examples(data_path, solver, tokenizer):
-    examples = []
-    for path in os.listdir(data_path):
-        with open(os.path.join(data_path, path)) as f:
-            for task in json.load(f):
-                if int(task['id']) == 8:
-                    examples.extend(get_examples_from_task(task, solver, tokenizer))
+def _get_optimizer(model, train_size, config):
+    num_total_steps = int(train_size / config.train_batch_size * config.epoch_count)
+    num_warmup_steps = int(num_total_steps * config.warm_up)
 
-    return examples
+    optimizer = AdamW(model.parameters(), lr=config.learning_rate, correct_bias=False)
+    scheduler = WarmupLinearSchedule(optimizer, warmup_steps=num_warmup_steps, t_total=num_total_steps)
+
+    return optimizer, scheduler
 
 
 def _get_batch_collector(device, is_train=True):
@@ -148,56 +120,12 @@ class ClassifierTrainer(ModelTrainer):
         return outputs['loss'], info
 
 
-def _pack_model(model_path):
-    checkpoint = torch.load(model_path)
-    torch.save({'model': checkpoint['model']}, model_path)
-
-
-def _fit_classifier(train_examples, test_examples):
-    use_cuda = torch.cuda.is_available()
-    device = torch.device('cuda:0' if use_cuda else 'cpu')
-
-    batch_collector = _get_batch_collector(device)
-
-    train_batch_size, test_batch_size = 32, 32
-    epoch_count = 10
-
-    bert = load_bert('data/')
-    model = BertMulticlassClassifier(bert, class_count=len(_ERRORS), output_name='error_type').to(device)
-
-    train_loader = DataLoader(
-        train_examples, batch_size=train_batch_size,
-        shuffle=True, collate_fn=batch_collector
-    )
-    test_loader = DataLoader(
-        test_examples, batch_size=test_batch_size,
-        shuffle=False, collate_fn=batch_collector
-    )
-
-    print(next(iter(train_loader)))
-
-    num_total_steps = int(len(train_examples) / train_batch_size * epoch_count)
-    num_warmup_steps = int(num_total_steps * 0.1)
-
-    optimizer = AdamW(model.parameters(), lr=1e-5, correct_bias=False)
-    scheduler = WarmupLinearSchedule(optimizer, warmup_steps=num_warmup_steps, t_total=num_total_steps)
-
-    model_path = 'data/models/solver8.pt'
-    trainer = ClassifierTrainer(
-        model, optimizer, scheduler, use_tqdm=True, model_path=model_path
-    )
-    trainer.fit(
-        train_iter=train_loader, train_batches_per_epoch=int(len(train_examples) / train_batch_size),
-        epochs_count=epoch_count, val_iter=test_loader,
-        val_batches_per_epoch=int(len(test_examples) / test_batch_size)
-    )
-    _pack_model(model_path)
-
-
 class Solver():
-    def __init__(self):
-        self._model = None
-        self._tokenizer = None
+    def __init__(self, data_path='data'):
+        self._model = BertMulticlassClassifier(
+            init_bert(data_path), class_count=len(_ERRORS), output_name='error_type'
+        )
+        self._tokenizer = load_bert_tokenizer(data_path)
         self.morph = pymorphy2.MorphAnalyzer()
 
         use_cuda = torch.cuda.is_available()
@@ -233,6 +161,57 @@ class Solver():
 
         return choices, normalized_conditions
 
+    def _get_examples_from_task(self, task):
+        choices, conditions = self.parse_task(task)
+        if 'correct_variants' in task['solution']:
+            answers = task['solution']['correct_variants'][0]
+        else:
+            answers = task['solution']['correct']
+
+        choice_index_to_error_type = {
+            int(answers[option]) - 1: conditions[option_index]
+            for option_index, option in enumerate(sorted(answers))
+        }
+        choice_index_to_error_type = {
+            choice_index: choice_index_to_error_type.get(choice_index, _ERRORS[-1])
+            for choice_index, choice in enumerate(choices)
+        }
+
+        assert len(answers) == sum(1 for error_type in choice_index_to_error_type.values() if error_type != _ERRORS[-1])
+
+        for choice_index, choice in enumerate(choices):
+            error_type = choice_index_to_error_type[choice_index]
+
+            text = _SPACES_FIX_PATTERN.sub(' ', choices[choice_index]['text'])
+
+            tokenization = self._tokenizer.encode_plus(text, add_special_tokens=True)
+            assert len(tokenization['input_ids']) == len(tokenization['token_type_ids'])
+
+            yield Example(
+                text=text,
+                token_ids=tokenization['input_ids'],
+                segment_ids=tokenization['token_type_ids'],
+                mask=[1] * len(tokenization['input_ids']),
+                error_type=error_type,
+                error_type_id=_ERRORS.index(error_type)
+            )
+
+    def _prepare_examples(self, tasks):
+        examples = [
+            example for task in tasks
+            for example in self._get_examples_from_task(task)
+        ]
+
+        print('Examples:')
+        for example in examples[0:100:10]:
+            print(example)
+
+        print('Examples count:', len(examples))
+        for idx, error in enumerate(_ERRORS):
+            print('Examples for error {}: {}'.format(error, sum(1 for ex in examples if ex.error_type_id == idx)))
+
+        return examples
+
     def predict_random(self, task):
         """ Test a random choice model """
         conditions = task["question"]["left"]
@@ -246,21 +225,40 @@ class Solver():
         return self.predict_from_model(task)
 
     def fit(self, tasks):
-        pass
+        examples = self._prepare_examples(tasks)
 
-    def load(self, path="data/models/solver8.pt", bert_path='data'):
-        self._tokenizer = load_bert_tokenizer(bert_path)
-
-        model_checkpoint = torch.load('data/models/solver8.pt', map_location=self._device)
+        config = TrainConfig()
         self._model = BertMulticlassClassifier(
-            init_bert(bert_path), class_count=len(_ERRORS), output_name='error_type'
+            load_bert('data/'), class_count=len(_ERRORS), output_name='error_type'
+        ).to(self._device)
+
+        batch_collector = _get_batch_collector(self._device, is_train=True)
+
+        train_loader = DataLoader(
+            examples, batch_size=config.train_batch_size,
+            shuffle=True, collate_fn=batch_collector, pin_memory=False
         )
-        self._model.load_state_dict(model_checkpoint['model'])
+        print(next(iter(train_loader)))
+
+        optimizer, scheduler = _get_optimizer(self._model, len(examples), config)
+
+        trainer = ClassifierTrainer(
+            self._model, optimizer, scheduler, use_tqdm=True
+        )
+        trainer.fit(
+            train_iter=train_loader,
+            train_batches_per_epoch=int(len(examples) / config.train_batch_size),
+            epochs_count=config.epoch_count,
+        )
+
+    def load(self, path="data/models/solver8.pkl"):
+        model_checkpoint = torch.load(path, map_location=self._device)
+        self._model.load_state_dict(model_checkpoint)
         self._model.to(self._device)
         self._model.eval()
 
     def save(self, path="data/models/solver8.pkl"):
-        pass
+        torch.save(self._model.state_dict(), path)
 
     def predict_from_model(self, task):
         choices, conditions = self.parse_task(task)
@@ -295,23 +293,11 @@ class Solver():
 
 
 def _train():
-    bert_tokenizer = load_bert_tokenizer('data/')
+    from utils import load_tasks
 
     solver = Solver()
-    train_examples = _read_examples('dataset/train', solver, bert_tokenizer)
-    test_examples = _read_examples('dataset/test', solver, bert_tokenizer)
-
-    train_examples = [example for example in train_examples if example not in test_examples]
-
-    print('Examples:')
-    for example in train_examples[0:100:10]:
-        print(example)
-
-    print('Examples count:', len(train_examples))
-    for idx, error in enumerate(_ERRORS):
-        print('Examples for error {}: {}'.format(error, sum(1 for ex in train_examples if ex.error_type_id == idx)))
-
-    _fit_classifier(train_examples, test_examples)
+    solver.fit(load_tasks('dataset/train/', task_num=8))
+    solver.save()
 
 
 def _test_apply():
@@ -400,4 +386,4 @@ def _test_apply():
 
 if __name__ == "__main__":
     _train()
-    # _test_apply()
+    _test_apply()
