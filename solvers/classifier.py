@@ -93,6 +93,7 @@ class SubSolver(object):
             if file_name.endswith(".json"):
                 data = read_config(os.path.join(dir_path, file_name))
                 tasks.append(data)
+        tasks = [task for task in tasks if 'hint' not in task]
         return self.fit(tasks)
 
     @classmethod

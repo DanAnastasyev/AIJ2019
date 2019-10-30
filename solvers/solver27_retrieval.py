@@ -251,8 +251,8 @@ def main():
     import os
 
     with open('predicted_essays.txt', 'w') as f_out:
-        for path in os.listdir('public_set/test/')[2:]:
-            with open('public_set/test/' + path) as f:
+        for path in os.listdir('dataset/test/')[2:]:
+            with open('dataset/test/' + path) as f:
                 for task in json.load(f):
                     if int(task['id']) == 27:
                         f_out.write(task['text'] + '\n')

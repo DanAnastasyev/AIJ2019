@@ -49,7 +49,7 @@ class Solver(AbstractSolver):
             sentences = [re.sub(r"^\d\) ?", "", sentence['text']) for sentence in task["question"]["choices"]]
             sentences = self.strs_to_pos_tags(sentences)
             X.extend(sentences)
-            y.extend([1 if str(i+1) in correct else 0 for i in range(5)])
+            y.extend([1 if str(i+1) in correct else 0 for i in range(len(sentences))])
         X = self.count_vectorizer.fit_transform(X).toarray()
         X_train, X_dev, y_train, y_dev = train_test_split(X, y, train_size=0.9)
         self.classifier.fit(X_train, y_train, eval_set=(X_dev, y_dev))

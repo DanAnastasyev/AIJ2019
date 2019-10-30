@@ -26,8 +26,8 @@ class Score(object):
 
 class Evaluation(object):
 
-    def __init__(self, train_path="public_set/train",
-                 test_path="public_set/test",
+    def __init__(self, train_path="dataset/train",
+                 test_path="dataset/test",
                  score_path="data/evaluation/scoring.json"):
         self.train_path = train_path
         self.test_path = test_path
@@ -89,7 +89,8 @@ class Evaluation(object):
                     if hasattr(solver, "save"):
                         solver.save("data/models/solver{}.pkl".format(solver_index))
                     trained = True
-                except:
+                except KeyboardInterrupt as e:
+                    print(e)
                     pass
             if not trained:
                 print("Loading Solver {}".format(solver_index))
@@ -182,7 +183,11 @@ class Evaluation(object):
                 task_index, task_type = int(task['id']), task["question"]["type"]
                 print("Predicting task {} ({})...".format(task_index, task_number[i]))
                 y_true = task["solution"]
-                prediction = self.solvers[task_number[i] - 1].predict_from_model(task)
+                prediction = 'invalid'
+                try:
+                    prediction = self.solvers[task_number[i] - 1].predict_from_model(task)
+                except Exception as e:
+                    print(e)
 
                 if task_type == "matching":
                     score = self.get_matching_score(y_true, prediction)

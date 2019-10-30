@@ -45,6 +45,7 @@ class Solver(BertEmbedder):
         text = " ".join([t for t in task["text"].split(".") if "\n" in t])
         words = [w.strip(punctuation).split() for w in text.split("\n") if "Исправьте" not in w and len(w) > 1]
         words = [" ".join([w.lower() for w in words_ if w.isupper()]) for words_ in words]
+        words = [word for word in words if word]
         return words
 
     def get_representatives(self, word, threshold=65):
