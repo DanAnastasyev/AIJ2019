@@ -128,7 +128,7 @@ class BertEmbedder(object):
         for text in text_list:
             token_list = self.tokenizer.tokenize("[CLS] " + text + " [SEP]")
             begin = token_list.index("[SEP]")
-            end = token_list[begin:].index("[SEP]") - 1
+            end = token_list[begin + 1:].index("[SEP]") + begin
             token_list.pop(begin)
             token_list.pop(end)
             segments_ids, indexed_tokens = [1] * len(token_list), self.tokenizer.convert_tokens_to_ids(token_list)
