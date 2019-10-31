@@ -1,5 +1,6 @@
 import os
 import random
+import re
 from collections import OrderedDict
 from functools import wraps
 from abc import ABC, abstractmethod
@@ -7,9 +8,11 @@ import pickle
 
 import torch
 import ufal.udpipe
-from pytorch_pretrained_bert import BertModel, BertTokenizer, BertConfig
 
 wdir = os.path.dirname(os.path.abspath(__file__))
+
+
+_SPACES_FIX_PATTERN = re.compile('\s+')
 
 
 def singleton(cls):
@@ -53,6 +56,8 @@ class AbstractSolver(ABC):
 
 
 def init_bert(bert_path):
+    from pytorch_pretrained_bert import BertModel, BertConfig
+
     bert_config = BertConfig.from_json_file(os.path.join(bert_path, 'bert_config.json'))
     return BertModel(bert_config)
 
@@ -79,6 +84,8 @@ def load_bert(bert_path):
 
 
 def load_bert_tokenizer(bert_path):
+    from pytorch_pretrained_bert import BertTokenizer
+
     return BertTokenizer.from_pretrained(os.path.join(bert_path, 'vocab.txt'), do_lower_case=False)
 
 
@@ -283,3 +290,7 @@ def random_solve_task(task):
         if random.randint(0, 1):
             choice_decisions.append(ch["id"])
     return choice_decisions
+
+
+def fix_spaces(text):
+    return _SPACES_FIX_PATTERN.sub(' ', text)

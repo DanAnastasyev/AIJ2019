@@ -19,8 +19,8 @@ from solvers.torch_utils import (
     BertMulticlassClassifier, init_bert, load_bert, load_bert_tokenizer
 )
 
+from solvers.utils import fix_spaces
 
-_SPACES_FIX_PATTERN = re.compile('\s+')
 
 _ERRORS = [
     'деепричастный оборот',
@@ -120,7 +120,7 @@ class ClassifierTrainer(ModelTrainer):
         return outputs['loss'], info
 
 
-class Solver():
+class Solver(object):
     def __init__(self, data_path='data'):
         self._model = BertMulticlassClassifier(
             init_bert(data_path), class_count=len(_ERRORS), output_name='error_type'
@@ -182,7 +182,7 @@ class Solver():
         for choice_index, choice in enumerate(choices):
             error_type = choice_index_to_error_type[choice_index]
 
-            text = _SPACES_FIX_PATTERN.sub(' ', choices[choice_index]['text'])
+            text = fix_spaces(choices[choice_index]['text'])
 
             tokenization = self._tokenizer.encode_plus(text, add_special_tokens=True)
             assert len(tokenization['input_ids']) == len(tokenization['token_type_ids'])
@@ -264,7 +264,7 @@ class Solver():
         choices, conditions = self.parse_task(task)
         examples = []
         for choice in choices:
-            text = _SPACES_FIX_PATTERN.sub(' ', choice['text'])
+            text = fix_spaces(choice['text'])
             tokenization = self._tokenizer.encode_plus(text, add_special_tokens=True)
 
             examples.append(Example(

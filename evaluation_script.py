@@ -7,7 +7,8 @@ from collections import defaultdict
 from utils import *
 from solvers import *
 
-RETRAIN = False
+RETRAIN = True
+EVAL_ONLY = None
 
 def zero_if_exception(scorer):
     def new_scorer(*args, **kwargs):
@@ -78,13 +79,11 @@ class Evaluation(object):
     def solver_fitting(self):
         time_limit_is_observed = True
         for i, solver in enumerate(self.solvers):
-            if i != 3 - 1:
-                continue
             start = time.time()
             solver_index = i + 1
             train_tasks = load_tasks(self.train_path, task_num=solver_index)
             trained = False
-            if RETRAIN or not hasattr(solver, "load"):
+            if RETRAIN == True or (isinstance(RETRAIN, set) and i + 1 in RETRAIN) or not hasattr(solver, "load"):
                 try:
                     print("Fitting Solver {}...".format(solver_index))
                     solver.fit(train_tasks)
@@ -178,8 +177,8 @@ class Evaluation(object):
             data = read_config(os.path.join(self.test_path, filename))[:-1]
             task_number = self.classifier.predict(data)
             for i, task in enumerate(data):
-                # if int(task['id']) not in {8}:
-                #     continue
+                if EVAL_ONLY and int(task['id']) not in EVAL_ONLY:
+                    continue
 
                 start = time.time()
                 task_index, task_type = int(task['id']), task["question"]["type"]
@@ -233,6 +232,7 @@ class Evaluation(object):
 def main():
     warnings.filterwarnings("ignore")
     evaluation = Evaluation()
+
     time_limit_is_observed = evaluation.predict_from_baseline()
     if not time_limit_is_observed:
         print('TIMEOUT: some solvers predict longer then 60s!')

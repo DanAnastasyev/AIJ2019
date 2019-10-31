@@ -13,7 +13,38 @@ from collections import OrderedDict
 from operator import attrgetter
 from transformers import BertModel, BertTokenizer, BertConfig
 
+from solvers.utils import fix_spaces
+
 logger = logging.getLogger(__name__)
+
+
+@attr.s
+class BertExample(object):
+    text = attr.ib()
+    token_ids = attr.ib()
+    segment_ids = attr.ib()
+    mask = attr.ib()
+    text_pair = attr.ib(default=None)
+
+    def __len__(self):
+        return len(self.token_ids)
+
+    @classmethod
+    def build(cls, text, tokenizer, text_pair=None):
+        text = fix_spaces(text)
+        if text_pair:
+            text_pair = fix_spaces(text_pair)
+
+        tokenization = tokenizer.encode_plus(text, text_pair=text_pair, add_special_tokens=True)
+        assert len(tokenization['input_ids']) == len(tokenization['token_type_ids'])
+
+        return cls(
+            text=text,
+            token_ids=tokenization['input_ids'],
+            segment_ids=tokenization['token_type_ids'],
+            mask=[1] * len(tokenization['input_ids']),
+            text_pair=text_pair
+        )
 
 
 @attr.s(frozen=True)
@@ -104,6 +135,36 @@ class BertMulticlassClassifier(nn.Module):
         loss = 0.
         if self._output_name + '_id' in batch:
             loss = F.cross_entropy(status_logits, batch[self._output_name + '_id'])
+
+        return {
+            self._output_name + '_logits': status_logits,
+            'loss': loss
+        }
+
+
+class BertBinaryClassifier(nn.Module):
+    def __init__(self, bert, output_name, bert_output_dim=768):
+        super(BertBinaryClassifier, self).__init__()
+
+        self._bert = bert
+        self._dropout = nn.Dropout(0.3)
+        self._predictor = nn.Linear(bert_output_dim, 1)
+        self._output_name = output_name
+
+    def forward(self, batch):
+        outputs, pooled_outputs = self._bert(
+            input_ids=batch['token_ids'],
+            attention_mask=batch['mask'],
+            token_type_ids=batch['segment_ids'],
+        )
+
+        status_logits = self._predictor(self._dropout(pooled_outputs)).squeeze(-1)
+
+        loss = 0.
+        if self._output_name + '_id' in batch:
+            loss = F.binary_cross_entropy_with_logits(
+                status_logits, batch[self._output_name + '_id']
+            )
 
         return {
             self._output_name + '_logits': status_logits,
@@ -277,7 +338,8 @@ class ModelTrainer(object):
         return '{:>5s} Loss = {:.5f}, '.format(self._name, loss.item()) + metrics_info
 
     def forward_pass(self, batch):
-        raise NotImplementedError
+        outputs = self._model(batch)
+        return outputs['loss'], 'Loss = {:.3f}'.format(outputs['loss'].item())
 
     def backward_pass(self, loss):
         self._optimizer.zero_grad()
@@ -294,16 +356,19 @@ class ModelTrainer(object):
         if val_iter is not None:
             val_batches_per_epoch = val_batches_per_epoch or len(val_iter)
 
-        for epoch in range(epochs_count):
-            name_prefix = '[{} / {}] '.format(epoch + 1, epochs_count)
-            self._do_epoch(iter(train_iter), is_train=True,
-                           batches_count=train_batches_per_epoch,
-                           name=name_prefix + 'Train:')
+        try:
+            for epoch in range(epochs_count):
+                name_prefix = '[{} / {}] '.format(epoch + 1, epochs_count)
+                self._do_epoch(iter(train_iter), is_train=True,
+                            batches_count=train_batches_per_epoch,
+                            name=name_prefix + 'Train:')
 
-            if val_iter is not None:
-                self._do_epoch(iter(val_iter), is_train=False,
-                               batches_count=val_batches_per_epoch,
-                               name=name_prefix + '  Val:')
+                if val_iter is not None:
+                    self._do_epoch(iter(val_iter), is_train=False,
+                                batches_count=val_batches_per_epoch,
+                                name=name_prefix + '  Val:')
+        except KeyboardInterrupt:
+            logger.info('Early stopping was triggered')
 
         if self._model_path:
             save_model(self._model, self._optimizer, self._scheduler, self._model_path)
