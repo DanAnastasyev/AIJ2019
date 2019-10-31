@@ -7,8 +7,9 @@ from collections import defaultdict
 from utils import *
 from solvers import *
 
-RETRAIN = True
-EVAL_ONLY = None
+RETRAIN = {}
+EVAL_ONLY = False
+LOAD_ONLY = False
 
 def zero_if_exception(scorer):
     def new_scorer(*args, **kwargs):
@@ -41,33 +42,38 @@ class Evaluation(object):
         self.classifier = classifier.Solver()
         self.clf_fitting()
         self.solvers = [
-            solver1.Solver(),
-            solver2.Solver(),
-            solver3.Solver(),
-            solver4.Solver(),
-            solver5_local.Solver(),
-            solver6.Solver(),
-            solver7.Solver(),
-            solver8.Solver(),
-            solver9.Solver(),
-            solver10.Solver(),
-            solver10.Solver(),
-            solver10.Solver(),
-            solver13.Solver(),
-            solver14.Solver(),
-            solver15.Solver(),
-            solver16.Solver(),
-            solver17.Solver(train_size=0.9),
-            solver17.Solver(train_size=0.85),
-            solver17.Solver(train_size=0.85),
-            solver17.Solver(train_size=0.85),
-            solver21.Solver(),
-            solver22.Solver(),
-            solver23.Solver(),
-            solver24.Solver(),
-            solver25.Solver(),
-            solver26.Solver()
+            solver1.Solver,
+            solver2.Solver,
+            solver3.Solver,
+            solver4.Solver,
+            solver5_local.Solver,
+            solver6.Solver,
+            solver7.Solver,
+            solver8.Solver,
+            solver9.Solver,
+            solver10.Solver,
+            solver10.Solver,
+            solver10.Solver,
+            solver13.Solver,
+            solver14.Solver,
+            solver15.Solver,
+            solver16.Solver,
+            lambda: solver17.Solver(train_size=0.9),
+            lambda: solver17.Solver(train_size=0.85),
+            lambda: solver17.Solver(train_size=0.85),
+            lambda: solver17.Solver(train_size=0.85),
+            solver21.Solver,
+            solver22.Solver,
+            solver23.Solver,
+            solver24.Solver,
+            solver25.Solver,
+            solver26.Solver
         ]
+        global LOAD_ONLY
+        if not LOAD_ONLY:
+            LOAD_ONLY = range(26)
+        self.solvers = {i - 1: self.solvers[i - 1]() for i in LOAD_ONLY}
+
         self.time_limit_is_ok = True
         time_limit_is_observed = self.solver_fitting()
         if time_limit_is_observed:
@@ -78,7 +84,7 @@ class Evaluation(object):
 
     def solver_fitting(self):
         time_limit_is_observed = True
-        for i, solver in enumerate(self.solvers):
+        for i, solver in self.solvers.items():
             start = time.time()
             solver_index = i + 1
             train_tasks = load_tasks(self.train_path, task_num=solver_index)
@@ -182,8 +188,6 @@ class Evaluation(object):
 
                 start = time.time()
                 task_index, task_type = int(task['id']), task["question"]["type"]
-                if task_index != 3:
-                    continue
                 print("Predicting task {} ({})...".format(task_index, task_number[i]))
                 y_true = task["solution"]
                 prediction = 'invalid'

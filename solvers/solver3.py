@@ -79,7 +79,7 @@ class Solver(BertEmbedder):
                 idx = lemmas.index(query_word.lower())
                 text = " ".join(words[:idx] + ['[SEP]', query_word.lower(), '[SEP]'] + words[idx + 1:])
         text_vector = self.contextual_word_embedding([text])[0]
-        pretext = '[SEP] ' + query_word.lower() + ' [SEP] - это '
+        pretext =  query_word.lower() + ' - это '
         variants = [pretext + re.sub('\d+[.)]', '', variant) for variant in variants]
         variant_vectors = self.sentence_embedding(variants)
         i, predictions = 0, {}

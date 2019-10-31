@@ -14,7 +14,7 @@ class Solver(AbstractSolver):
         }
 
         self.exceptions = {
-            "alternations": ["ст..лист", "прим..р", "г..рева", "г..рю", "г..рд", "алг..ритм", "г..ризонт", "г..рист"],
+            "alternations": ["интелл..генция", "ст..лист", "прим..р", "г..рева", "г..рю", "г..рд", "алг..ритм", "г..ризонт", "г..рист"],
             "verifiable": [],
             "unverifiable": []
         }
@@ -28,29 +28,40 @@ class Solver(AbstractSolver):
         nice_option_ids = list()
         for option in choices:
             parsed_option = re.sub(r"^\d\)", "", option["text"]).split(", ")
-            if all(self.is_of_type(word, type_) for word in parsed_option):
-                nice_option_ids.append(option["id"])
+            pos_count = 0
+            neg_count = 0
+            for word in parsed_option:
+                for k in self.known_examples:
+                    if self.is_of_type(word, k):
+                        if k == type_:
+                            pos_count += 1
+                        else:
+                            neg_count += 1
+            nice_option_ids.append((pos_count if neg_count == 0 else -neg_count, option["id"]))
+        nice_option_ids.sort()
         if choices[0]["text"].count(", ") == 0:
             if len(nice_option_ids) == 0:
                 return [random.choice([str(i + 1) for i in range(5)])]
             elif len(nice_option_ids) == 1:
-                return nice_option_ids
+                return [nice_option_ids[0][1]]
             else:
-                return [random.choice(nice_option_ids)]
+                return [nice_option_ids[-1][1]]
         else:
             if len(nice_option_ids) == 0:
                 return sorted(random.sample([str(i + 1) for i in range(5)], 2))
             elif len(nice_option_ids) == 1:
-                return sorted(nice_option_ids + [random.choice([str(i + 1) for i in range(5)
-                                                                if str(i + 1) != nice_option_ids[0]])])
+                return sorted([nice_option_ids[0][1]] + [random.choice([str(i + 1) for i in range(5)
+                                                                if str(i + 1) != nice_option_ids[0][1]])])
             elif len(nice_option_ids) in [2, 3]:
-                return sorted(nice_option_ids)
+                return sorted([el[1] for el in nice_option_ids])
             else:
-                return sorted(random.sample(nice_option_ids, 2))
+                return sorted([el[1] for el in nice_option_ids[-2:]])
 
     def fit(self, tasks):
-        alt, unver = "чередующаяся", "непроверяемая"
+        alt, unver, ver = "чередующаяся", "непроверяемая", "проверяемая"
         for task in tasks:
+            #if 'hint' in task:
+                #continue
             task = standardize_task(task)
             text = task["text"]
 
@@ -58,8 +69,10 @@ class Solver(AbstractSolver):
                 type_ = "alternations"
             elif unver in text:
                 type_ = "unverifiable"
-            else:
+            elif ver in text:
                 type_ = "verifiable"
+            else:
+                continue
 
             correct = task["solution"]["correct_variants"][0] if "correct_variants" in task["solution"] \
                 else task["solution"]["correct"]
@@ -71,7 +84,7 @@ class Solver(AbstractSolver):
 
     def is_of_type(self, word, type_):
         if any(alternation in word for alternation in self.known_examples[type_]) \
-                and not any(exception in word for exception in self.exceptions):
+                and not any(exception in word for exception in self.exceptions[type_]):
             return True
         else:
             return False
