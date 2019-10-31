@@ -78,6 +78,8 @@ class Evaluation(object):
     def solver_fitting(self):
         time_limit_is_observed = True
         for i, solver in enumerate(self.solvers):
+            if i != 3 - 1:
+                continue
             start = time.time()
             solver_index = i + 1
             train_tasks = load_tasks(self.train_path, task_num=solver_index)
@@ -181,6 +183,8 @@ class Evaluation(object):
 
                 start = time.time()
                 task_index, task_type = int(task['id']), task["question"]["type"]
+                if task_index != 3:
+                    continue
                 print("Predicting task {} ({})...".format(task_index, task_number[i]))
                 y_true = task["solution"]
                 prediction = 'invalid'

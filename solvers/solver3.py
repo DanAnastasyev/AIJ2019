@@ -81,7 +81,7 @@ class Solver(BertEmbedder):
         text_vector = self.contextual_word_embedding([text])[0]
         pretext = '[SEP] ' + query_word.lower() + ' [SEP] - это '
         variants = [pretext + re.sub('\d+[.)]', '', variant) for variant in variants]
-        variant_vectors = self.contextual_word_embedding(variants)
+        variant_vectors = self.sentence_embedding(variants)
         i, predictions = 0, {}
         for j in variant_vectors:
             sim = cosine_similarity(text_vector.reshape(1, -1), j.reshape(1, -1)).flatten()[0]
@@ -112,10 +112,10 @@ class Solver(BertEmbedder):
 
     def load(self, path="data/models/solver3.pkl"):
         pass
-    
+
     def save(self, path='data/models/solver3.pkl'):
         pass
-    
+
     def predict_from_model(self, task):
         text, task, variants, word = self.process_task(task)
         result = self.compare_text_with_variants(word, text, variants)
