@@ -123,6 +123,21 @@ class BertEmbedder(object):
             embeddings.append(sent_embedding)
         return embeddings
 
+    def contextual_word_embedding(self, text_list):
+        embeddings = []
+        for text in text_list:
+            token_list = self.tokenizer.tokenize("[CLS] " + text + " [SEP]")
+            begin = token_list.index("[SEP]")
+            end = token_list[begin:].index("[SEP]") - 1
+            token_list.pop(begin)
+            token_list.pop(end)
+            segments_ids, indexed_tokens = [1] * len(token_list), self.tokenizer.convert_tokens_to_ids(token_list)
+            segments_tensors, tokens_tensor = torch.tensor([segments_ids]), torch.tensor([indexed_tokens])
+            with torch.no_grad():
+                encoded_layers, _ = self.model(tokens_tensor, segments_tensors)
+            embeddings.append(torch.mean(encoded_layers[11][0][begin:end], 0))
+        return embeddings
+
     def token_embedding(self, token_list):
         token_embedding = []
         for token in token_list:

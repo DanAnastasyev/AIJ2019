@@ -72,15 +72,19 @@ class Solver(BertEmbedder):
     def compare_text_with_variants(self, word, text, variants):
         sents = self.sent_split(text)
         for sent in sents:
+            words = self.toktok.tokenize(text)
             lemmas = [self.morph.parse(word)[0].normal_form for word in
-                  self.toktok.tokenize(text)]
+                  words]
             if word.lower() in lemmas:
-                text = sent
-        text_vector = self.sentence_embedding([text])
-        variant_vectors = self.sentence_embedding(variants)
+                idx = lemmas.index(word.lower())
+                text = " ".join(words[:idx] + ['[SEP]', word.lower(), '[SEP]'] + words[idx + 1:])
+        text_vector = self.contextual_word_embedding([text])[0]
+        pretext = '[SEP] ' + word.lower() + ' [SEP] - это '
+        variants = [pretext + re.sub('\d+[.)]', '', variant) for variant in variants]
+        variant_vectors = self.contextual_word_embedding(variants)
         i, predictions = 0, {}
         for j in variant_vectors:
-            sim = cosine_similarity(text_vector[0].reshape(1, -1), j.reshape(1, -1)).flatten()[0]
+            sim = cosine_similarity(text_vector.reshape(1, -1), j.reshape(1, -1)).flatten()[0]
             predictions[i] = sim
             i += 1
         indexes = sorted(predictions.items(), key=operator.itemgetter(1), reverse=True)[:1]
