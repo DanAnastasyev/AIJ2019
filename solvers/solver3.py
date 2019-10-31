@@ -69,17 +69,17 @@ class Solver(BertEmbedder):
         reg = r'\(\n*\d+\n*\)'
         return re.split(reg, text)
 
-    def compare_text_with_variants(self, word, text, variants):
+    def compare_text_with_variants(self, query_word, text, variants):
         sents = self.sent_split(text)
         for sent in sents:
-            words = self.toktok.tokenize(text)
+            words = self.toktok.tokenize(sent)
             lemmas = [self.morph.parse(word)[0].normal_form for word in
                   words]
-            if word.lower() in lemmas:
-                idx = lemmas.index(word.lower())
-                text = " ".join(words[:idx] + ['[SEP]', word.lower(), '[SEP]'] + words[idx + 1:])
+            if query_word.lower() in lemmas:
+                idx = lemmas.index(query_word.lower())
+                text = " ".join(words[:idx] + ['[SEP]', query_word.lower(), '[SEP]'] + words[idx + 1:])
         text_vector = self.contextual_word_embedding([text])[0]
-        pretext = '[SEP] ' + word.lower() + ' [SEP] - это '
+        pretext = '[SEP] ' + query_word.lower() + ' [SEP] - это '
         variants = [pretext + re.sub('\d+[.)]', '', variant) for variant in variants]
         variant_vectors = self.contextual_word_embedding(variants)
         i, predictions = 0, {}
