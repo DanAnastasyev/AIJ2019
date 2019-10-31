@@ -71,7 +71,7 @@ class Evaluation(object):
         ]
         global LOAD_ONLY
         if not LOAD_ONLY:
-            LOAD_ONLY = range(26)
+            LOAD_ONLY = range(1, 27)
         self.solvers = {i - 1: self.solvers[i - 1]() for i in LOAD_ONLY}
 
         self.time_limit_is_ok = True
