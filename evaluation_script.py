@@ -7,9 +7,9 @@ from collections import defaultdict
 from utils import *
 from solvers import *
 
-LOAD_ONLY = {5}
+LOAD_ONLY = False
 RETRAIN = False
-EVAL_ONLY = LOAD_ONLY
+EVAL_ONLY = False
 
 def zero_if_exception(scorer):
     def new_scorer(*args, **kwargs):
