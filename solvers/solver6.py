@@ -42,11 +42,18 @@ class Solver(BertEmbedder):
 
         results = []
         for bigram in bigrams:
-            if bigram[0] != bigram[1]:
+            if bigram[0] != bigram[1] and bigram[0][1] == 'ADJF' and bigram[1][1] == 'NOUN':
                 b1 = self.sentence_embedding([bigram[0][0]])[0].reshape(1, -1)
                 b2 = self.sentence_embedding([bigram[1][0]])[0].reshape(1, -1)
                 sim = cosine_similarity(b1, b2)[0][0]
                 results.append((sim, bigram[0][0], bigram[1][0], bigram[0][1], bigram[0][1]))
+        if not results:
+            for bigram in bigrams:
+                if bigram[0] != bigram[1]:
+                    b1 = self.sentence_embedding([bigram[0][0]])[0].reshape(1, -1)
+                    b2 = self.sentence_embedding([bigram[1][0]])[0].reshape(1, -1)
+                    sim = cosine_similarity(b1, b2)[0][0]
+                    results.append((sim, bigram[0][0], bigram[1][0], bigram[0][1], bigram[0][1]))
         results = sorted(results)
         final_pair = results[-1]
         if final_pair[-1] == 'NOUN' and final_pair[-2] == 'NOUN':
