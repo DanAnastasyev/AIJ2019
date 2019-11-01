@@ -3,7 +3,7 @@ import random
 import numpy as np
 import pymorphy2
 from catboost import CatBoostClassifier
-from nltk.tokenize.toktok import ToktokTokenizer
+from solvers.utils import ToktokTokenizer
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.model_selection import train_test_split
 from solvers.utils import standardize_task, AbstractSolver

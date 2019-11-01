@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from sklearn.feature_extraction.text import TfidfVectorizer
-from nltk.tokenize.toktok import ToktokTokenizer
+from solvers.utils import ToktokTokenizer
 import random
 import numpy as np
 from sklearn.svm import LinearSVC

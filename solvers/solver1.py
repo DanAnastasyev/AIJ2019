@@ -2,7 +2,7 @@ import re
 import random
 import operator
 import pymorphy2
-from nltk.tokenize import ToktokTokenizer
+from solvers.utils import ToktokTokenizer
 from sklearn.metrics.pairwise import cosine_similarity
 from solvers.utils import BertEmbedder
 

@@ -2,7 +2,7 @@ import re
 import operator
 import random
 import pymorphy2
-from nltk.tokenize import ToktokTokenizer
+from solvers.utils import ToktokTokenizer
 from sklearn.metrics.pairwise import cosine_similarity
 from solvers.utils import BertEmbedder
 
@@ -71,14 +71,23 @@ class Solver(BertEmbedder):
 
     def compare_text_with_variants(self, query_word, text, variants):
         sents = self.sent_split(text)
+        text_vector = None
         for sent in sents:
+            sent = re.sub('Прочитайте фрагмент.*', '', sent)
             words = self.toktok.tokenize(sent)
-            lemmas = [self.morph.parse(word)[0].normal_form for word in
+            lemmas = [self.morph.parse(word) for word in
                   words]
-            if query_word.lower() in lemmas:
-                idx = lemmas.index(query_word.lower())
-                text = " ".join(words[:idx] + ['[SEP]', query_word.lower(), '[SEP]'] + words[idx + 1:])
-        text_vector = self.contextual_word_embedding([text])[0]
+            word_idx = None
+            for idx in range(len(lemmas)):
+                if query_word.lower() in [el.normal_form for el in lemmas[idx]]:
+                    word_idx = idx
+                    break
+            if word_idx is not None:
+                text = " ".join(words[:word_idx] + ['|', query_word.lower(), '|'] + words[word_idx + 1:])
+                text_vector = self.contextual_word_embedding([text])[0]
+                break
+        else:
+            text_vector = self.sentence_embedding([text])[0]
         pretext =  query_word.lower() + ' - это '
         variants = [pretext + re.sub('\d+[.)]', '', variant) for variant in variants]
         variant_vectors = self.sentence_embedding(variants)
