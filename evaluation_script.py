@@ -7,9 +7,9 @@ from collections import defaultdict
 from utils import *
 from solvers import *
 
-LOAD_ONLY = False
+LOAD_ONLY = {5}
 RETRAIN = False
-EVAL_ONLY = False
+EVAL_ONLY = LOAD_ONLY
 
 def zero_if_exception(scorer):
     def new_scorer(*args, **kwargs):
@@ -29,7 +29,7 @@ class Score(object):
 class Evaluation(object):
 
     def __init__(self, train_path="dataset/train",
-                 test_path="dataset/check",
+                 test_path="dataset/test",
                  score_path="data/evaluation/scoring.json"):
         self.train_path = train_path
         self.test_path = test_path
@@ -208,7 +208,7 @@ class Evaluation(object):
                 prediction = 'invalid'
                 try:
                     prediction = self.solvers[task_number - 1].predict_from_model(task)
-                except Exception as e:
+                except KeyboardInterrupt as e:
                     solver_errors += 1
                     print(e)
 

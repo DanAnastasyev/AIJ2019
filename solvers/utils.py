@@ -5,7 +5,7 @@ from collections import OrderedDict
 from functools import wraps
 from abc import ABC, abstractmethod
 import pickle
-from razdel import tokenize
+from razdel import tokenize, sentenize
 
 import torch
 import ufal.udpipe
@@ -33,6 +33,9 @@ def singleton(cls):
 class ToktokTokenizer:
     def tokenize(self, text):
         return [_.text for _ in tokenize(text)]
+    
+    def sentenize(self, text):
+        return [_.text for _ in sentenize(text)]
 
 class AbstractSolver(ABC):
     def __init__(self, seed=42):
@@ -68,8 +71,35 @@ def init_bert(bert_path):
     return BertModel(bert_config)
 
 
+def init_masked_bert(bert_path):
+    from pytorch_pretrained_bert import BertForMaskedLM, BertConfig
+
+    bert_config = BertConfig.from_json_file(os.path.join(bert_path, 'bert_config.json'))
+    return BertForMaskedLM(bert_config)
+
+
 def load_bert(bert_path):
     bert_model = init_bert(bert_path)
+
+    state_dict = torch.load(os.path.join(bert_path, 'pytorch_model.bin'))
+    new_state_dict = OrderedDict()
+    for key, tensor in state_dict.items():
+        if key.startswith('bert'):
+            new_state_dict[key[5:]] = tensor
+        else:
+            new_state_dict[key] = tensor
+    missing_keys, unexpected_keys = bert_model.load_state_dict(new_state_dict, strict=False)
+
+    for key in missing_keys:
+        print('Key {} is missing in the bert checkpoint!'.format(key))
+    for key in unexpected_keys:
+        print('Key {} is unexpected in the bert checkpoint!'.format(key))
+
+    bert_model.eval()
+    return bert_model
+
+def load_masked_bert(bert_path):
+    bert_model = init_masked_bert(bert_path)
 
     state_dict = torch.load(os.path.join(bert_path, 'pytorch_model.bin'))
     new_state_dict = OrderedDict()
@@ -104,6 +134,7 @@ class BertEmbedder(object):
         self.model_file = "data/"
         self.vocab_file = "data/vocab.txt"
         self.model = self.bert_model()
+        self.masked_model = self.masked_bert_model()
         self.tokenizer = self.bert_tokenizer()
         self.embedding_matrix = self.get_bert_embed_matrix()
 
@@ -111,6 +142,12 @@ class BertEmbedder(object):
     def bert_model(self):
         model = load_bert(self.model_file)
         return model
+    
+    @singleton
+    def masked_bert_model(self):
+        model = load_masked_bert(self.model_file)
+        return model
+
 
     @singleton
     def bert_tokenizer(self):
@@ -135,6 +172,22 @@ class BertEmbedder(object):
             sent_embedding = torch.mean(encoded_layers[11], 1)
             embeddings.append(sent_embedding)
         return embeddings
+
+    def fill_mask(self, text_before, text_after, token):
+        MASK = self.tokenizer.convert_tokens_to_ids(['[MASK]'])[0]
+        token = self.tokenizer.tokenize(token)
+        token = self.tokenizer.convert_tokens_to_ids(token)
+        text = text_before + " [MASK] " * len(token) + text_after
+        token_list = self.tokenizer.tokenize("[CLS] " + text + " [SEP]")
+        segments_ids, indexed_tokens = [1] * len(token_list), self.tokenizer.convert_tokens_to_ids(token_list)
+        segments_tensors, tokens_tensor = torch.tensor([segments_ids]), torch.tensor([indexed_tokens])
+        with torch.no_grad():
+            logits = self.masked_model(tokens_tensor, segments_tensors)
+            p = 0
+            mask_idx = indexed_tokens.index(MASK)
+            for i in range(len(token)):
+                p += logits[0][mask_idx + i][token[i]]
+            return p / len(token)
 
     def contextual_word_embedding(self, text_list):
         embeddings = []
