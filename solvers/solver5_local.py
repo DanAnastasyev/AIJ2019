@@ -5,17 +5,19 @@ import pickle
 import pymorphy2
 import re
 import random
+from solvers.utils import ToktokTokenizer, BertEmbedder
+from sklearn.metrics.pairwise import cosine_similarity
 
-
-class Solver(object):
+class Solver(BertEmbedder):
 
     def __init__(self, seed=42):
-
+        super(Solver, self).__init__()
         self.morph = pymorphy2.MorphAnalyzer()
-        self.model = Model.load("data/udpipe_syntagrus.model")
-        self.process_pipeline = Pipeline(self.model, 'tokenize', Pipeline.DEFAULT, Pipeline.DEFAULT, 'conllu')
+        self.ud_model = Model.load("data/udpipe_syntagrus.model")
+        self.process_pipeline = Pipeline(self.ud_model, 'tokenize', Pipeline.DEFAULT, Pipeline.DEFAULT, 'conllu')
         self.seed = seed
         self.init_seed()
+        self.toktok = ToktokTokenizer()
         self.paronyms = self.get_paronyms()
         self.freq_bigrams = self.open_freq_grams()
 
@@ -31,7 +33,7 @@ class Solver(object):
         paronyms = []
         with open('data/paronyms.csv', 'r', encoding='utf-8') as in_file:
             for line in in_file.readlines():
-                pair = line.strip(punctuation).split('\t')
+                pair = line.strip(punctuation).strip().split('\t')
                 paronyms.append(pair)
         return paronyms
 
@@ -155,13 +157,23 @@ class Solver(object):
     def save(self, path="data/models/solver5.pkl"):
         pass
 
+    def get_score(self, a, b, paronym):
+        return self.fill_mask(a, b, paronym.lower())
+        return cosine_similarity(self.sentence_embedding([sent])[0].reshape(1, -1),
+                                 self.sentence_embedding([paronym.lower()])[0].reshape(1, -1))[0][0]
+
     def predict_from_model(self, task):
         description = task["text"].replace('НЕВЕРНО ', "неверно ")
         sents = []
-        for line in description.split("\n"):
-            for token in line.split():
+        for line in self.toktok.sentenize(description):
+            line_tok = self.toktok.tokenize(line)
+            for idx, token in enumerate(line_tok):
                 if token.isupper() and len(token) > 2: # get CAPS paronyms
                     second_pair = self.find_paronyms(token)
-                    sents.append((token, second_pair, line))
-        result = self.check_frequencies(sents)
-        return result.strip(punctuation+'\n')
+                    line_before = ' '.join(line_tok[:idx])
+                    line_after = ' '.join(line_tok[idx + 1:])
+                    if second_pair != '':
+                        score = self.get_score(line_before, line_after, token) / self.get_score(line_before, line_after, second_pair)
+                        sents.append((score, token, second_pair))
+        sents.sort()
+        return sents[0][2].strip(punctuation+'\n')

@@ -30,7 +30,7 @@ class Score(object):
 
 class Evaluation(object):
 
-    def __init__(self, train_path="dataset/full_train",
+    def __init__(self, train_path="dataset/train",
                  test_path="dataset/test",
                  score_path="data/evaluation/scoring.json"):
         self.train_path = train_path
@@ -210,7 +210,7 @@ class Evaluation(object):
                 prediction = 'invalid'
                 try:
                     prediction = self.solvers[task_number - 1].predict_from_model(task)
-                except Exception as e:
+                except KeyboardInterrupt as e:
                     solver_errors += 1
                     print(e)
 
