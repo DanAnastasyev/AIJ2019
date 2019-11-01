@@ -187,7 +187,7 @@ class BertEmbedder(object):
             mask_idx = indexed_tokens.index(MASK)
             for i in range(len(token)):
                 p += logits[0][mask_idx + i][token[i]]
-            return p / len(token)
+            return p
 
     def contextual_word_embedding(self, text_list):
         embeddings = []
