@@ -33,7 +33,7 @@ def singleton(cls):
 class ToktokTokenizer:
     def tokenize(self, text):
         return [_.text for _ in tokenize(text)]
-    
+
     def sentenize(self, text):
         return [_.text for _ in sentenize(text)]
 
@@ -102,13 +102,7 @@ def load_masked_bert(bert_path):
     bert_model = init_masked_bert(bert_path)
 
     state_dict = torch.load(os.path.join(bert_path, 'pytorch_model.bin'))
-    new_state_dict = OrderedDict()
-    for key, tensor in state_dict.items():
-        if key.startswith('bert'):
-            new_state_dict[key[5:]] = tensor
-        else:
-            new_state_dict[key] = tensor
-    missing_keys, unexpected_keys = bert_model.load_state_dict(new_state_dict, strict=False)
+    missing_keys, unexpected_keys = bert_model.load_state_dict(state_dict, strict=False)
 
     for key in missing_keys:
         print('Key {} is missing in the bert checkpoint!'.format(key))
@@ -142,7 +136,7 @@ class BertEmbedder(object):
     def bert_model(self):
         model = load_bert(self.model_file)
         return model
-    
+
     @singleton
     def masked_bert_model(self):
         model = load_masked_bert(self.model_file)
