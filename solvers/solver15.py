@@ -40,7 +40,7 @@ class TrainConfig(object):
     learning_rate = attr.ib(default=1e-5)
     train_batch_size = attr.ib(default=32)
     test_batch_size = attr.ib(default=32)
-    epoch_count = attr.ib(default=10)
+    epoch_count = attr.ib(default=20)
     warm_up = attr.ib(default=0.1)
 
 
