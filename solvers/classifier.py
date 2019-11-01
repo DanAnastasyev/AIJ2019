@@ -5,6 +5,9 @@ from solvers.utils import ToktokTokenizer
 import random
 import numpy as np
 from sklearn.svm import LinearSVC
+from catboost import CatBoostClassifier
+import catboost
+from sklearn.model_selection import train_test_split
 #import utils
 import os
 from utils import read_config, load_pickle, save_pickle
@@ -50,12 +53,12 @@ class SubSolver(object):
     >>> # Load classifier
     >>> clf.load("clf.pickle")
     """
-
     def __init__(self, t='text', seed=42, ngram_range=(1, 3)):
         self.seed = seed
         self.ngram_range = ngram_range
         self.vectorizer = TfidfVectorizer(ngram_range=ngram_range)
-        self.clf = LinearSVC(multi_class='ovr')
+        self.vectorizer2 = TfidfVectorizer(ngram_range=ngram_range)
+        self.clf = LinearSVC(multi_class="ovr")
         self.init_seed()
         self.word_tokenizer = ToktokTokenizer()
         self.type = t
@@ -64,6 +67,16 @@ class SubSolver(object):
         np.random.seed(self.seed)
         random.seed(self.seed)
 
+    def convert_to_text(self, task):
+        text = self.word_tokenizer.tokenize(task['text'])
+        if self.type in ["choice", "multiple_choice"]:
+            choice_type = [t for t in task['question']['choices'][0].keys() if t != 'id'][0]
+            text.append(choice_type)
+            for el in task['question']['choices']:
+                text += self.word_tokenizer.tokenize(el[choice_type])
+        text = ' '.join(text)
+        return text
+    
     def fit(self, tasks):
         texts = []
         classes = []
@@ -71,8 +84,7 @@ class SubSolver(object):
             for task in data:
                 if task['question']['type'] == self.type:
                     idx = int(task["id"])
-                    text = " ".join(self.word_tokenizer.tokenize(task['text']))
-                    texts.append(text)
+                    texts.append(self.convert_to_text(task))
                     classes.append(idx)
         classes = np.array(classes)
         self.classes = np.unique(classes)
@@ -84,8 +96,9 @@ class SubSolver(object):
     def predict_one(self, task):
         if len(self.classes) == 1:
             return self.classes[0]
-        text = " ".join(self.word_tokenizer.tokenize(task['text']))
-        return self.clf.predict(self.vectorizer.transform([text]))[0]
+        text = self.convert_to_text(task)
+        return int(
+            self.clf.predict(self.vectorizer.transform([text])).ravel()[0])
 
     def fit_from_dir(self, dir_path):
         tasks = []
@@ -96,26 +109,45 @@ class SubSolver(object):
         tasks = [task for task in tasks if 'hint' not in task]
         return self.fit(tasks)
 
-    @classmethod
-    def load(cls, path):
-        return load_pickle(path)
+    def load(self, d):
+        self.vectorizer = d['vec']
+        self.clf = d['clf']
+        self.classes = d['classes']
 
-    def save(self, path):
-        save_pickle(self, path)
+    def save(self):
+        return {
+            "vec": self.vectorizer,
+            "clf": self.clf,
+            "classes": self.classes
+        }
 
 
 class Solver:
     def __init__(self, seed=42, ngram_range=(1, 3)):
         self.seed = seed
         self.ngram_range = ngram_range
-        self.clfs = {t: SubSolver(t, seed, ngram_range) for t in ('text', 'choice', 'multiple_choice', 'matching')}
-    
+        self.clfs = {
+            t: SubSolver(t, seed, ngram_range)
+            for t in ('text', 'choice', 'multiple_choice', 'matching')
+        }
+
     def fit(self, tasks):
-        for el in self.clfs.values():
+        for k, el in self.clfs.items():
+            print('Fitting classifier for ' + k)
             el.fit(tasks)
-    
+
     def predict(self, tasks):
         res = []
         for task in tasks:
             res.append(self.clfs[task['question']['type']].predict_one(task))
         return res
+
+    def load(self, path):
+        d = load_pickle(path)
+        for k, subsolver in self.clfs.items():
+            subsolver.load(d[k])
+
+    def save(self, path):
+        save_pickle(
+            {k: subsolver.save()
+             for k, subsolver in self.clfs.items()}, path)

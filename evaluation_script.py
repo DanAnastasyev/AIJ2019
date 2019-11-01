@@ -7,9 +7,9 @@ from collections import defaultdict
 from utils import *
 from solvers import *
 
+LOAD_ONLY = False
 RETRAIN = False
 EVAL_ONLY = False
-LOAD_ONLY = False
 
 def zero_if_exception(scorer):
     def new_scorer(*args, **kwargs):
@@ -111,14 +111,19 @@ class Evaluation(object):
         return time_limit_is_observed
 
     def clf_fitting(self):
-        tasks = []
-        for filename in os.listdir(self.train_path):
-            if filename.endswith(".json"):
-                data = read_config(os.path.join(self.train_path, filename))
-                tasks.append(data)
-        print("Fitting Classifier...")
-        self.classifier.fit(tasks)
-        print("Classifier is ready!")
+        try:
+            self.classifier.load("data/models/clf.pkl")
+            print('Loaded classifier')
+        except OSError:
+            tasks = []
+            for filename in os.listdir(self.train_path):
+                if filename.endswith(".json"):
+                    data = read_config(os.path.join(self.train_path, filename))
+                    tasks.append(data)
+            print("Fitting Classifier...")
+            self.classifier.fit(tasks)
+            self.classifier.save("data/models/clf.pkl")
+            print("Classifier is ready!")
 
     # для всех заданий с 1 баллом
     @zero_if_exception
@@ -182,20 +187,22 @@ class Evaluation(object):
             predictions = []
             print("Solving {}".format(filename))
             data = read_config(os.path.join(self.test_path, filename))[:-1]
-            task_number = self.classifier.predict(data)
+            clf_predictions = self.classifier.predict(data)
             for i, task in enumerate(data):
                 task_index, task_type = int(task['id']), task["question"]["type"]
-                if task_index != task_number[i]:
-                    clf_errors += 1
+                task_number = clf_predictions[i]
+                if task_index != task_number:
+                    if task_index not in range(17, 21) or task_number not in range(17, 21):
+                        clf_errors += 1
                 if EVAL_ONLY is not False and int(task['id']) not in EVAL_ONLY:
                     continue
 
                 start = time.time()
-                print("Predicting task {} ({})...".format(task_index, task_number[i]))
+                print("Predicting task {} ({})...".format(task_index, task_number))
                 y_true = task["solution"]
                 prediction = 'invalid'
                 try:
-                    prediction = self.solvers[task_number[i] - 1].predict_from_model(task)
+                    prediction = self.solvers[task_number - 1].predict_from_model(task)
                 except Exception as e:
                     print(e)
 
