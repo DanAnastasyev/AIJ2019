@@ -41,7 +41,7 @@ class Evaluation(object):
         self.task_scores = defaultdict(Score)
         self.classifier = classifier.Solver()
         self.clf_fitting()
-        s17 = solver17.Solver(train_size=0.9)
+        s17 = punctuator.Solver()
         self.solvers = [
             solver1.Solver,
             solver2.Solver,
@@ -208,7 +208,7 @@ class Evaluation(object):
                 prediction = 'invalid'
                 try:
                     prediction = self.solvers[task_number - 1].predict_from_model(task)
-                except KeyboardInterrupt as e:
+                except Exception as e:
                     solver_errors += 1
                     print(e)
 

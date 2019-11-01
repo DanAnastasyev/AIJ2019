@@ -144,8 +144,6 @@ class Solver(object):
 
     def _convert_task(self, task):
         text = task["text"].replace("?", ".").replace("\xa0", "")
-        n_count = text.split(".")[0].split()[-1].lower()
-        n_positions = []
         sentence = ' '.join(list(self._get_sentences(text)))
 
         correct = None
@@ -161,11 +159,7 @@ class Solver(object):
             tokens.extend(self._tokenizer.tokenize(sentence[prev_match_end: match.start()].strip()))
             positions.append(len(tokens))
             tokens.append('[MASK]')
-
-            token_end = sentence[match.end():].split()[0]
-            tokens.append('##' + token_end)
-
-            prev_match_end = match.end() + len(token_end)
+            prev_match_end = match.end()
 
         tokens.extend(self._tokenizer.tokenize(sentence[prev_match_end:].strip()))
         tokens.append('[SEP]')
@@ -178,11 +172,7 @@ class Solver(object):
         for position_id, position in enumerate(positions):
             label_id = None
             if correct is not None:
-                if (position_id in correct and len(n_count) == 1
-                        or position_id not in correct and len(n_count) == 2):
-                    label_id = 0
-                else:
-                    label_id = 1
+                label_id = int(position_id in correct)
 
             yield Example(
                 tokens=tokens,
@@ -193,13 +183,22 @@ class Solver(object):
                 label_id=label_id
             )
 
-    def fit(self, tasks):
+    def _prepare_examples(self, tasks):
         examples = []
         for task in tasks:
             for example in self._convert_task(task):
                 examples.append(example)
+        return examples
 
-        print('Examples count:', len(examples))
+    def fit(self, tasks, test_tasks=None):
+        train_examples = self._prepare_examples(tasks)
+        test_examples = None
+        if test_tasks is not None:
+            test_examples = self._prepare_examples(test_tasks)
+
+        print('Examples count:', len(train_examples))
+        for example in train_examples[0:100:10]:
+            print(example)
 
         config = TrainConfig()
         self._model = BertClassifier(
@@ -209,33 +208,41 @@ class Solver(object):
         batch_collector = _get_batch_collector(self._device, is_train=True)
 
         train_loader = DataLoader(
-            examples, batch_size=config.train_batch_size,
+            train_examples, batch_size=config.train_batch_size,
             shuffle=True, collate_fn=batch_collector, pin_memory=False
         )
+        test_loader, test_batches_per_epoch = None, 0
+        if test_examples is not None:
+            test_loader = DataLoader(
+                test_examples, batch_size=config.test_batch_size,
+                shuffle=False, collate_fn=batch_collector, pin_memory=False
+            )
+            test_batches_per_epoch = int(len(test_examples) / config.test_batch_size)
+
         print(next(iter(train_loader)))
 
-        optimizer, scheduler = _get_optimizer(self._model, len(examples), config)
+        optimizer, scheduler = _get_optimizer(self._model, len(train_examples), config)
 
         trainer = ClassifierTrainer(
             self._model, optimizer, scheduler, use_tqdm=True
         )
         trainer.fit(
             train_iter=train_loader,
-            train_batches_per_epoch=int(len(examples) / config.train_batch_size),
-            epochs_count=config.epoch_count,
+            train_batches_per_epoch=int(len(train_examples) / config.train_batch_size),
+            val_iter=test_loader, val_batches_per_epoch=test_batches_per_epoch,
+            epochs_count=config.epoch_count
         )
 
-    def save(self, path="data/models/solver15.pkl"):
-        torch.save(self._model.state_dict(), path)
+    def save(self, path="data/models/punctuator.pkl"):
+        torch.save(self._model.state_dict(), 'data/models/punctuator.pkl')
 
-    def load(self, path="data/models/solver15.pkl"):
-        model_checkpoint = torch.load(path, map_location=self._device)
+    def load(self, path="data/models/punctuator.pkl"):
+        model_checkpoint = torch.load('data/models/punctuator.pkl', map_location=self._device)
         self._model.load_state_dict(model_checkpoint)
         self._model.eval()
 
     def predict_from_model(self, task):
         text = task["text"].replace("?", ".").replace("\xa0", "")
-        n_count = text.split(".")[0].split()[-1].lower()
 
         examples = list(self._convert_task(task))
         model_inputs = self._batch_collector(examples)
@@ -247,7 +254,7 @@ class Solver(object):
         prediction = [
             str(choices[ind]['id'])
             for ind, logit in enumerate(model_prediction)
-            if logit > 0. and len(n_count) == 2 or logit <= 0 and len(n_count) == 1
+            if logit > 0.
         ]
 
         return prediction
@@ -257,12 +264,18 @@ def main():
     from utils import load_tasks
 
     solver = Solver()
-    solver.fit(load_tasks('dataset/train/', task_num=15))
+
+    train_tasks, test_tasks = [], []
+    for task_id in range(17, 21):
+        train_tasks.extend(load_tasks('dataset/train/', task_num=task_id))
+        test_tasks.extend(load_tasks('dataset/test/', task_num=task_id))
+
+    solver.fit(train_tasks, test_tasks)
     solver.save()
 
     solver = Solver()
     solver.load()
-    task = load_tasks('dataset/test/', task_num=15)[0]
+    task = load_tasks('dataset/test/', task_num=17)[0]
     print(task)
     print(solver.predict_from_model(task))
 
