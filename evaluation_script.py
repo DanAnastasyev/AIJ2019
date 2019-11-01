@@ -8,8 +8,8 @@ from utils import *
 from solvers import *
 
 RETRAIN = False
-EVAL_ONLY = {}
-LOAD_ONLY = {}
+EVAL_ONLY = False
+LOAD_ONLY = False
 
 def zero_if_exception(scorer):
     def new_scorer(*args, **kwargs):
