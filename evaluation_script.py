@@ -177,17 +177,20 @@ class Evaluation(object):
 
     def predict_from_baseline(self):
         time_limit_is_observed = True
+        clf_errors = 0
         for filename in os.listdir(self.test_path):
             predictions = []
             print("Solving {}".format(filename))
             data = read_config(os.path.join(self.test_path, filename))[:-1]
             task_number = self.classifier.predict(data)
             for i, task in enumerate(data):
+                task_index, task_type = int(task['id']), task["question"]["type"]
+                if task_index != task_number[i]:
+                    clf_errors += 1
                 if EVAL_ONLY and int(task['id']) not in EVAL_ONLY:
                     continue
 
                 start = time.time()
-                task_index, task_type = int(task['id']), task["question"]["type"]
                 print("Predicting task {} ({})...".format(task_index, task_number[i]))
                 y_true = task["solution"]
                 prediction = 'invalid'
@@ -230,6 +233,7 @@ class Evaluation(object):
                     print("Time limit is violated in solver {} which has been predicting for {}m {:2}s".format(
                         i+1, int(duration // 60), duration % 60))
             self.test_scores.append(predictions)
+        print('Total {} errors of the Classifier'.format(clf_errors))
         return time_limit_is_observed
 
 
