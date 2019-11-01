@@ -41,12 +41,12 @@ class Solver(BertEmbedder):
             paronyms.add(par2)
         try:
             closest = get_close_matches(par, list(paronyms))[0]
-        except indexerror:
-            closest = none
+        except IndexError:
+            closest = None
         return closest
 
     def check_pair(self, token_norm):
-        paronym = none
+        paronym = None
         for p1, p2 in self.paronyms:
             if token_norm == p1:
                 paronym = p2
@@ -61,21 +61,21 @@ class Solver(BertEmbedder):
         token_norm = token_all.normal_form
         paronym = self.check_pair(token_norm)
 
-        if paronym is none:
+        if paronym is None:
             paronym_close = self.find_closest_paronym(token_norm)
             paronym = self.check_pair(paronym_close)
 
-        if paronym is not none:
+        if paronym is not None:
             paronym_parse = self.morph.parse(paronym)[0]
             try:
                 str_grammar = str(token_all.tag).split()[1]
-            except indexerror:
+            except IndexError:
                 str_grammar = str(token_all.tag)
 
-            gr = set(str_grammar.replace("qual ", "").replace(' ',',').split(','))
+            gr = set(str_grammar.replace("Qual ", "").replace(' ',',').split(','))
             try:
                 final_paronym = paronym_parse.inflect(gr).word
-            except attributeerror:
+            except AttributeError:
                 final_paronym = paronym
         else:
             final_paronym = ''
