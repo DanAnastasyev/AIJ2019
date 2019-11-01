@@ -222,14 +222,14 @@ class Solver(object):
         text.append('\n')
 
         comment_start = [
-            'Рассуждая об этом, автор указывает на два взаимодополняющих примера.',
+            'Рассуждая об этом, автор приводит несколько аргументов.',
             'В тексте легко найти примеры, поясняющие позицию автора.',
-            'Автор упоминает несколько примеров, обозначающих данную проблему.'
+            'Автор последовательно излагает свою точку зрения.'
         ]
 
         my_position = [
             'Откровенно говоря, я не могу уверенно сказать, что сам когда-либо задумывался над данной проблемой. '
-            'Но теперь, прочитав данное произведение автора, я могу сказать, что я целиком и полностью согласен с ним. '
+            'Но теперь, прочитав данный отрывок, я могу сказать, что я целиком и полностью согласен с ним. '
             'Больше того, мне уже даже кажется, что где-то в глубине души я всегда рассуждал именно так. '
             'И я даже легко вспоминаю другое произведение, в котором поднимается схожий вопрос. {}\n',
 
@@ -249,10 +249,13 @@ class Solver(object):
             'а прекрасный язык усиливает эффект от прочитанного.'
         ]
 
+        dots = ['.' if sent[-1] == '.' else '' for sent in problem_sentences]
+        problem_sentences = [sent.strip('.') for sent in problem_sentences]
+
         text.extend([
             random.choice(comment_start),
-            'Он пишет: "{}".'.format(problem_sentences[0]),
-            'Эту позицию дополнительно подчеркивают такие слова, как: "{}".'.format(problem_sentences[1]),
+            'Автор пишет: «{}»{}'.format(problem_sentences[0], dots[0]),
+            'Еще яснее раскрывается мысль в следующих словах: «{}»{}'.format(problem_sentences[1], dots[1]),
             'В итоге авторская позиция ясна: {}\n'.format(problem['author_position']),
             random.choice(my_position).format(argument),
             random.choice(conclusion).format(author_name)
@@ -276,7 +279,7 @@ class Solver(object):
 
 
 def main():
-    solver = Solver(problems_path='good_essays_filtered.json')
+    solver = Solver(problems_path='good_essays.json')
 
     import os
 
