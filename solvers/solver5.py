@@ -109,7 +109,7 @@ class Solver(BertEmbedder):
                     line_before = ' '.join(line_tok[:idx])
                     line_after = ' '.join(line_tok[idx + 1:])
                     if second_pair != '':
-                        score = self.get_score(line_before, line_after, token) / self.get_score(line_before, line_after, second_pair)
+                        score = self.get_score(line_before, line_after, token) - self.get_score(line_before, line_after, second_pair)
                         sents.append((score, token, second_pair))
         sents.sort()
         return sents[0][2].strip(punctuation+'\n')
