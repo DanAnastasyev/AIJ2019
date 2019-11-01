@@ -7,9 +7,9 @@ from collections import defaultdict
 from utils import *
 from solvers import *
 
-RETRAIN = {}
-EVAL_ONLY = False
-LOAD_ONLY = False
+RETRAIN = False
+EVAL_ONLY = {}
+LOAD_ONLY = {}
 
 def zero_if_exception(scorer):
     def new_scorer(*args, **kwargs):
@@ -70,7 +70,7 @@ class Evaluation(object):
             solver26.Solver
         ]
         global LOAD_ONLY
-        if not LOAD_ONLY:
+        if LOAD_ONLY is False:
             LOAD_ONLY = range(1, 27)
         self.solvers = {i - 1: self.solvers[i - 1]() for i in LOAD_ONLY}
 
@@ -89,7 +89,7 @@ class Evaluation(object):
             solver_index = i + 1
             train_tasks = load_tasks(self.train_path, task_num=solver_index)
             trained = False
-            if RETRAIN == True or (isinstance(RETRAIN, set) and i + 1 in RETRAIN) or not hasattr(solver, "load"):
+            if RETRAIN is True or (isinstance(RETRAIN, set) and i + 1 in RETRAIN) or not hasattr(solver, "load"):
                 try:
                     print("Fitting Solver {}...".format(solver_index))
                     solver.fit(train_tasks)
@@ -187,7 +187,7 @@ class Evaluation(object):
                 task_index, task_type = int(task['id']), task["question"]["type"]
                 if task_index != task_number[i]:
                     clf_errors += 1
-                if EVAL_ONLY and int(task['id']) not in EVAL_ONLY:
+                if EVAL_ONLY is not False and int(task['id']) not in EVAL_ONLY:
                     continue
 
                 start = time.time()
