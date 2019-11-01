@@ -13,13 +13,15 @@ def rus_tok(text, m = pymorphy2.MorphAnalyzer()):
 CONVERTER = {'А': 'A', 'Б': 'B', 'В': 'C', 'Г': 'D', 'B': 'C'}
 
 def load_tasks(dir_path, task_num=None):
+    if not isinstance(task_num, list):
+        task_num = [task_num]
     tasks, filenames = [], [os.path.join(dir_path, f) for f in os.listdir(dir_path)]
     for filename in filenames:
         if filename.endswith(".json"):
             with open(filename, encoding='utf-8') as f:
                 dt = f.read().encode('utf-8')
                 data = json.loads(dt)
-                tasks += [d for d in data if 'id' in d and int(d['id']) == task_num]
+                tasks += [d for d in data if 'id' in d and int(d['id']) in task_num]
     '''
     for task in tasks:
         if task['id'] == '26' and 'hint' in task:

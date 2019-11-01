@@ -68,6 +68,7 @@ class SubSolver(object):
         random.seed(self.seed)
 
     def convert_to_text(self, task):
+        #return task['text']
         text = self.word_tokenizer.tokenize(task['text'])
         if self.type in ["choice", "multiple_choice"]:
             choice_type = [t for t in task['question']['choices'][0].keys() if t != 'id'][0]
@@ -84,6 +85,8 @@ class SubSolver(object):
             for task in data:
                 if task['question']['type'] == self.type:
                     idx = int(task["id"])
+                    if idx in range(17, 21):
+                        idx = 17
                     texts.append(self.convert_to_text(task))
                     classes.append(idx)
         classes = np.array(classes)

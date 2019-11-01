@@ -29,7 +29,7 @@ class Score(object):
 class Evaluation(object):
 
     def __init__(self, train_path="dataset/train",
-                 test_path="dataset/test",
+                 test_path="dataset/check",
                  score_path="data/evaluation/scoring.json"):
         self.train_path = train_path
         self.test_path = test_path
@@ -41,6 +41,7 @@ class Evaluation(object):
         self.task_scores = defaultdict(Score)
         self.classifier = classifier.Solver()
         self.clf_fitting()
+        s17 = solver17.Solver(train_size=0.9)
         self.solvers = [
             solver1.Solver,
             solver2.Solver,
@@ -58,10 +59,10 @@ class Evaluation(object):
             solver14.Solver,
             solver15.Solver,
             solver16.Solver,
-            lambda: solver17.Solver(train_size=0.9),
-            lambda: solver17.Solver(train_size=0.85),
-            lambda: solver17.Solver(train_size=0.85),
-            lambda: solver17.Solver(train_size=0.85),
+            lambda: s17,
+            lambda: s17,
+            lambda: s17,
+            lambda: s17,
             solver21.Solver,
             solver22.Solver,
             solver23.Solver,
@@ -87,7 +88,9 @@ class Evaluation(object):
         for i, solver in self.solvers.items():
             start = time.time()
             solver_index = i + 1
-            train_tasks = load_tasks(self.train_path, task_num=solver_index)
+            if solver_index in range(18, 21):
+                continue
+            train_tasks = load_tasks(self.train_path, task_num=solver_index if solver_index != 17 else [17, 18, 19, 20])
             trained = False
             if RETRAIN is True or (isinstance(RETRAIN, set) and i + 1 in RETRAIN) or not hasattr(solver, "load"):
                 try:
@@ -112,6 +115,7 @@ class Evaluation(object):
 
     def clf_fitting(self):
         try:
+            #raise OSError()
             self.classifier.load("data/models/clf.pkl")
             print('Loaded classifier')
         except OSError:
@@ -183,6 +187,7 @@ class Evaluation(object):
     def predict_from_baseline(self):
         time_limit_is_observed = True
         clf_errors = 0
+        solver_errors = 0
         for filename in os.listdir(self.test_path):
             predictions = []
             print("Solving {}".format(filename))
@@ -204,6 +209,7 @@ class Evaluation(object):
                 try:
                     prediction = self.solvers[task_number - 1].predict_from_model(task)
                 except Exception as e:
+                    solver_errors += 1
                     print(e)
 
                 if task_type == "matching":
@@ -241,6 +247,7 @@ class Evaluation(object):
                         i+1, int(duration // 60), duration % 60))
             self.test_scores.append(predictions)
         print('Total {} errors of the Classifier'.format(clf_errors))
+        print('Total {} errors of solvers'.format(solver_errors))
         return time_limit_is_observed
 
 
@@ -261,6 +268,10 @@ def main():
     for task_id in sorted(evaluation.task_scores, key=lambda id: int(id)):
         print("{}\t{:.3%}".format(task_id,
               float(evaluation.task_scores[task_id].score) / evaluation.task_scores[task_id].max_score
+              if evaluation.task_scores[task_id].max_score != 0 else 0.))
+    for task_id in sorted(evaluation.task_scores, key=lambda id: int(id)):
+        print("{}".format(
+              float(evaluation.task_scores[task_id].score) / evaluation.task_scores[task_id].max_score * 100
               if evaluation.task_scores[task_id].max_score != 0 else 0.))
 
     if evaluation.time_limit_is_ok:
