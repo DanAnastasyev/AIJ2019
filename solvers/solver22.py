@@ -195,10 +195,12 @@ class Solver(object):
         most_similar_sent_indices = np.argmax(np.dot(choice_embeddings, sentence_embeddings.T), -1)
         most_similar_sentences = [sentences[ind] for ind in most_similar_sent_indices]
 
-        if 'correct' in task['solution']:
-            correct_indices = task['solution']['correct']
-        else:
-            correct_indices = sorted(task['solution']['correct_variants'][0])
+        correct_indices = {}
+        if 'solution' in task:
+            if 'correct' in task['solution']:
+                correct_indices = task['solution']['correct']
+            else:
+                correct_indices = sorted(task['solution']['correct_variants'][0])
 
         for sent, choice in zip(most_similar_sentences, choices):
             choice_text = re.sub('\s*\(?\d+(?:.|\))?\s*', '', choice['text'])
