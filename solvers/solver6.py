@@ -4,7 +4,7 @@ import nltk
 import pymorphy2
 from nltk.util import ngrams
 from sklearn.metrics.pairwise import cosine_similarity
-from solvers.utils import BertEmbedder
+from solvers.utils import BertEmbedder, ToktokTokenizer
 from string import punctuation
 
 
@@ -16,6 +16,7 @@ class Solver(BertEmbedder):
         self.init_seed()
         self.morph = pymorphy2.MorphAnalyzer()
         self.has_model = True
+        self.toktok = ToktokTokenizer()
         self.mode = 1 # 1 - find wrong word, 2 - replace word
 
     def init_seed(self):
@@ -29,7 +30,7 @@ class Solver(BertEmbedder):
 
     def exclude_word(self, task_sent):
         """Make it with Bert"""
-        tokens = [token.strip('.,";!:?><)«»') for token in task_sent.split(" ") if token != ""]
+        tokens = self.toktok.tokenize(task_sent)
 
         to_tokens = []
         for token in tokens:
@@ -42,11 +43,18 @@ class Solver(BertEmbedder):
 
         results = []
         for bigram in bigrams:
-            if bigram[0] != bigram[1]:
+            if bigram[0] != bigram[1] and bigram[0][1] == 'ADJF' and bigram[1][1] == 'NOUN':
                 b1 = self.sentence_embedding([bigram[0][0]])[0].reshape(1, -1)
                 b2 = self.sentence_embedding([bigram[1][0]])[0].reshape(1, -1)
                 sim = cosine_similarity(b1, b2)[0][0]
                 results.append((sim, bigram[0][0], bigram[1][0], bigram[0][1], bigram[0][1]))
+        if not results:
+            for bigram in bigrams:
+                if bigram[0] != bigram[1]:
+                    b1 = self.sentence_embedding([bigram[0][0]])[0].reshape(1, -1)
+                    b2 = self.sentence_embedding([bigram[1][0]])[0].reshape(1, -1)
+                    sim = cosine_similarity(b1, b2)[0][0]
+                    results.append((sim, bigram[0][0], bigram[1][0], bigram[0][1], bigram[0][1]))
         results = sorted(results)
         final_pair = results[-1]
         if final_pair[-1] == 'NOUN' and final_pair[-2] == 'NOUN':
