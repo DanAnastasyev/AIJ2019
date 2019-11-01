@@ -11,10 +11,6 @@ import traceback
 
 
 solver_param = defaultdict(dict)
-solver_param[17]["train_size"] = 0.9
-solver_param[18]["train_size"] = 0.85
-solver_param[19]["train_size"] = 0.85
-solver_param[20]["train_size"] = 0.85
 
 
 class CuttingEdgeStrongGeneralAI(object):
@@ -39,10 +35,10 @@ class CuttingEdgeStrongGeneralAI(object):
             solver14,
             solver15,
             solver16,
-            solver17,
-            solver17,
-            solver17,
-            solver17,
+            punctuator,
+            punctuator,
+            punctuator,
+            punctuator,
             solver21,
             solver22,
             solver23,
@@ -51,13 +47,18 @@ class CuttingEdgeStrongGeneralAI(object):
             solver26,
             solver27_retrieval
         ]
+        assert len(solver_classes) == 27
         self.solvers = self.solver_loading(solver_classes)
+        assert len(self.solvers) == 27
         self.clf_fitting()
 
     def solver_loading(self, solver_classes):
         solvers = []
         for i, solver_class in enumerate(solver_classes):
             solver_index = i + 1
+            if solver_index in range(18, 21):
+                solvers.append(solvers[17 - 1])
+                continue
             train_tasks = load_tasks(self.train_path, task_num=solver_index)
             solver_path = os.path.join("data", "models", "solver{}.pkl".format(solver_index))
             solver = solver_class.Solver(**solver_param[solver_index])
