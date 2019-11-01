@@ -7,9 +7,9 @@ from collections import defaultdict
 from utils import *
 from solvers import *
 
-RETRAIN = {}
-EVAL_ONLY = False
 LOAD_ONLY = False
+RETRAIN = False
+EVAL_ONLY = False
 
 def zero_if_exception(scorer):
     def new_scorer(*args, **kwargs):
@@ -29,7 +29,7 @@ class Score(object):
 class Evaluation(object):
 
     def __init__(self, train_path="dataset/train",
-                 test_path="dataset/test",
+                 test_path="dataset/check",
                  score_path="data/evaluation/scoring.json"):
         self.train_path = train_path
         self.test_path = test_path
@@ -41,6 +41,7 @@ class Evaluation(object):
         self.task_scores = defaultdict(Score)
         self.classifier = classifier.Solver()
         self.clf_fitting()
+        s17 = solver17.Solver(train_size=0.9)
         self.solvers = [
             solver1.Solver,
             solver2.Solver,
@@ -58,10 +59,10 @@ class Evaluation(object):
             solver14.Solver,
             solver15.Solver,
             solver16.Solver,
-            lambda: solver17.Solver(train_size=0.9),
-            lambda: solver17.Solver(train_size=0.85),
-            lambda: solver17.Solver(train_size=0.85),
-            lambda: solver17.Solver(train_size=0.85),
+            lambda: s17,
+            lambda: s17,
+            lambda: s17,
+            lambda: s17,
             solver21.Solver,
             solver22.Solver,
             solver23.Solver,
@@ -70,7 +71,7 @@ class Evaluation(object):
             solver26.Solver
         ]
         global LOAD_ONLY
-        if not LOAD_ONLY:
+        if LOAD_ONLY is False:
             LOAD_ONLY = range(1, 27)
         self.solvers = {i - 1: self.solvers[i - 1]() for i in LOAD_ONLY}
 
@@ -87,9 +88,11 @@ class Evaluation(object):
         for i, solver in self.solvers.items():
             start = time.time()
             solver_index = i + 1
-            train_tasks = load_tasks(self.train_path, task_num=solver_index)
+            if solver_index in range(18, 21):
+                continue
+            train_tasks = load_tasks(self.train_path, task_num=solver_index if solver_index != 17 else [17, 18, 19, 20])
             trained = False
-            if RETRAIN == True or (isinstance(RETRAIN, set) and i + 1 in RETRAIN) or not hasattr(solver, "load"):
+            if RETRAIN is True or (isinstance(RETRAIN, set) and i + 1 in RETRAIN) or not hasattr(solver, "load"):
                 try:
                     print("Fitting Solver {}...".format(solver_index))
                     solver.fit(train_tasks)
@@ -111,14 +114,20 @@ class Evaluation(object):
         return time_limit_is_observed
 
     def clf_fitting(self):
-        tasks = []
-        for filename in os.listdir(self.train_path):
-            if filename.endswith(".json"):
-                data = read_config(os.path.join(self.train_path, filename))
-                tasks.append(data)
-        print("Fitting Classifier...")
-        self.classifier.fit(tasks)
-        print("Classifier is ready!")
+        try:
+            #raise OSError()
+            self.classifier.load("data/models/clf.pkl")
+            print('Loaded classifier')
+        except OSError:
+            tasks = []
+            for filename in os.listdir(self.train_path):
+                if filename.endswith(".json"):
+                    data = read_config(os.path.join(self.train_path, filename))
+                    tasks.append(data)
+            print("Fitting Classifier...")
+            self.classifier.fit(tasks)
+            self.classifier.save("data/models/clf.pkl")
+            print("Classifier is ready!")
 
     # для всех заданий с 1 баллом
     @zero_if_exception
@@ -177,23 +186,30 @@ class Evaluation(object):
 
     def predict_from_baseline(self):
         time_limit_is_observed = True
+        clf_errors = 0
+        solver_errors = 0
         for filename in os.listdir(self.test_path):
             predictions = []
             print("Solving {}".format(filename))
             data = read_config(os.path.join(self.test_path, filename))[:-1]
-            task_number = self.classifier.predict(data)
+            clf_predictions = self.classifier.predict(data)
             for i, task in enumerate(data):
-                if EVAL_ONLY and int(task['id']) not in EVAL_ONLY:
+                task_index, task_type = int(task['id']), task["question"]["type"]
+                task_number = clf_predictions[i]
+                if task_index != task_number:
+                    if task_index not in range(17, 21) or task_number not in range(17, 21):
+                        clf_errors += 1
+                if EVAL_ONLY is not False and int(task['id']) not in EVAL_ONLY:
                     continue
 
                 start = time.time()
-                task_index, task_type = int(task['id']), task["question"]["type"]
-                print("Predicting task {} ({})...".format(task_index, task_number[i]))
+                print("Predicting task {} ({})...".format(task_index, task_number))
                 y_true = task["solution"]
                 prediction = 'invalid'
                 try:
-                    prediction = self.solvers[task_number[i] - 1].predict_from_model(task)
+                    prediction = self.solvers[task_number - 1].predict_from_model(task)
                 except Exception as e:
+                    solver_errors += 1
                     print(e)
 
                 if task_type == "matching":
@@ -230,6 +246,8 @@ class Evaluation(object):
                     print("Time limit is violated in solver {} which has been predicting for {}m {:2}s".format(
                         i+1, int(duration // 60), duration % 60))
             self.test_scores.append(predictions)
+        print('Total {} errors of the Classifier'.format(clf_errors))
+        print('Total {} errors of solvers'.format(solver_errors))
         return time_limit_is_observed
 
 
@@ -250,6 +268,10 @@ def main():
     for task_id in sorted(evaluation.task_scores, key=lambda id: int(id)):
         print("{}\t{:.3%}".format(task_id,
               float(evaluation.task_scores[task_id].score) / evaluation.task_scores[task_id].max_score
+              if evaluation.task_scores[task_id].max_score != 0 else 0.))
+    for task_id in sorted(evaluation.task_scores, key=lambda id: int(id)):
+        print("{}".format(
+              float(evaluation.task_scores[task_id].score) / evaluation.task_scores[task_id].max_score * 100
               if evaluation.task_scores[task_id].max_score != 0 else 0.))
 
     if evaluation.time_limit_is_ok:

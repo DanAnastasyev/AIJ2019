@@ -5,6 +5,7 @@ from collections import OrderedDict
 from functools import wraps
 from abc import ABC, abstractmethod
 import pickle
+from razdel import tokenize
 
 import torch
 import ufal.udpipe
@@ -27,6 +28,11 @@ def singleton(cls):
 
     return inner
 
+
+@singleton
+class ToktokTokenizer:
+    def tokenize(self, text):
+        return [_.text for _ in tokenize(text)]
 
 class AbstractSolver(ABC):
     def __init__(self, seed=42):
@@ -134,8 +140,8 @@ class BertEmbedder(object):
         embeddings = []
         for text in text_list:
             token_list = self.tokenizer.tokenize("[CLS] " + text + " [SEP]")
-            begin = token_list.index("[SEP]")
-            end = token_list[begin + 1:].index("[SEP]") + begin
+            begin = token_list.index("|")
+            end = token_list[begin + 1:].index("|") + begin
             token_list.pop(begin)
             token_list.pop(end)
             segments_ids, indexed_tokens = [1] * len(token_list), self.tokenizer.convert_tokens_to_ids(token_list)

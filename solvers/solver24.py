@@ -2,7 +2,7 @@ import os
 import random
 import re
 import pymorphy2
-from nltk.tokenize import ToktokTokenizer
+from solvers.utils import ToktokTokenizer
 
 
 class Solver(object):
