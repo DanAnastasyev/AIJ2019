@@ -78,14 +78,8 @@ class CuttingEdgeStrongGeneralAI(object):
         return solvers
 
     def clf_fitting(self):
-        tasks = []
-        for filename in os.listdir(self.train_path):
-            if filename.endswith(".json"):
-                data = read_config(os.path.join(self.train_path, filename))
-                tasks.append(data)
-        print("Fitting Classifier...")
-        self.classifier.fit(tasks)
-        print("Classifier is ready!")
+        self.classifier.load("data/models/clf.pkl")
+        print('Loaded classifier')
         return self
 
     def not_so_strong_task_solver(self, task):
