@@ -7,6 +7,8 @@ from collections import defaultdict
 from utils import *
 from solvers import *
 
+RETRAIN = False
+EVAL_ONLY = {17, 18, 19, 20}
 LOAD_ONLY = False
 RETRAIN = False
 EVAL_ONLY = False
@@ -28,8 +30,8 @@ class Score(object):
 
 class Evaluation(object):
 
-    def __init__(self, train_path="dataset/train",
-                 test_path="dataset/check",
+    def __init__(self, train_path="dataset/full_train",
+                 test_path="dataset/test",
                  score_path="data/evaluation/scoring.json"):
         self.train_path = train_path
         self.test_path = test_path
