@@ -6,9 +6,11 @@ import tensorflow as tf
 import tensorflow_hub as hub
 import numpy as np
 import tf_sentencepiece
+import random
 
 from string import punctuation
 from razdel import sentenize
+from solvers.utils import fix_spaces
 
 
 _SENTENCE_START_PATTERN = re.compile('\(\d\d?\)')
@@ -17,14 +19,13 @@ _AUTHOR_PATTERN = re.compile(
     '\s*[A-ZА-ЯЁ\u0301\u0306][-A-ZА-ЯЁa-zа-яё\u0301\u0306]+)[^)]*\)'
 )
 _AUTHOR_FALLBACK_PATTERN = re.compile('((?:[A-ZА-ЯЁ\u0301\u0306][-A-ZА-ЯЁa-zа-яё\u0301\u0306]*\s*){1,3})')
-_REPEATING_SPACE_PATTERN = re.compile('\s+')
 
 
 class Solver(object):
-    def __init__(self):
+    def __init__(self, problems_path='data/good_essays.json', arguments_path='data/arguments.json'):
         self._init_use('data/use-multilingual-large')
-        self._init_problems()
-        self._init_arguments()
+        self._init_problems(problems_path)
+        self._init_arguments(arguments_path)
 
     def _init_use(self, path):
         g = tf.Graph()
@@ -39,20 +40,20 @@ class Solver(object):
         self._session = tf.Session(graph=g)
         self._session.run(init_op)
 
-    def _init_problems(self):
-        with open('data/good_essays.json') as f:
+    def _init_problems(self, problems_path):
+        with open(problems_path) as f:
             essays = json.load(f)
 
         self._predefined_problems, problem_embedded_texts = [], []
         for essay in essays:
             for hint in essay['hints']:
-                problem = _REPEATING_SPACE_PATTERN.sub(' ', hint['problem']).strip()
+                problem = fix_spaces(hint['problem']).strip()
                 problem = problem.split(' ', 1)[1]
                 hint = {
                     'theme': hint['theme'].strip(),
-                    'comment': _REPEATING_SPACE_PATTERN.sub(' ', hint['comment']).strip(),
+                    'comment': fix_spaces(hint['comment']).strip(punctuation + ' '),
                     'problem': problem,
-                    'author_position': _REPEATING_SPACE_PATTERN.sub(' ', hint['author_position']).strip(),
+                    'author_position': fix_spaces(hint['author_position']).strip(punctuation + ' ') + '.',
                 }
                 problem_embedded_texts.append(self._get_hint_text(hint))
                 self._predefined_problems.append({
@@ -65,14 +66,14 @@ class Solver(object):
         )
         assert len(self._predefined_problems) == len(problem_embedded_texts) == len(self._problem_embeddings)
 
-    def _init_arguments(self):
-        with open('data/arguments.json') as f:
+    def _init_arguments(self, arguments_path):
+        with open(arguments_path) as f:
             arguments = json.load(f)
 
         self._predefined_arguments, argument_embedded_texts = [], []
         for argument in arguments:
             for example in argument['examples']:
-                example = _REPEATING_SPACE_PATTERN.sub(' ', example).strip(punctuation + ' ') + '.'
+                example = fix_spaces(example).strip(punctuation + ' ') + '.'
 
                 argument_embedded_text = argument['name'].strip(punctuation + ' ') + '.'
                 argument_embedded_text = argument_embedded_text[0].upper() + argument_embedded_text[1:]
@@ -198,8 +199,14 @@ class Solver(object):
         argument_index = np.dot(self._argument_embeddings, self._problem_embeddings[problem_index]).argmax()
         argument = self._predefined_arguments[argument_index]
 
-        text = ['Есть темы мимолетные, а есть вечные. Не счесть, сколько уже раз писатели'
-                ' касались темы {}, сколько строк посвятили ей.'.format(problem['theme'])]
+        text = []
+
+        intro_sentences = [
+            'Есть темы мимолетные, а есть вечные. Не счесть, сколько уже раз писатели касались темы {}, сколько строк посвятили ей.',
+            'Не раз и не два писатели посвящали себя теме {}.',
+            'Можно ли прожить жизнь и не быть затронутым темой {}?'
+        ]
+        text.append(random.choice(intro_sentences).format(problem['theme']))
 
         if preposition:
             text.append('Автору данного произведения, {}, приходится столкнуться с проблемой {}.'.format(
@@ -211,21 +218,44 @@ class Solver(object):
             author_name = 'автору'
 
         if problem['comment']:
-            text.append('Это приводит к вопросу: {}.'.format(problem['comment']))
+            text.append('Это наводит на вопрос: {}.'.format(problem['comment']))
         text.append('\n')
 
-        text.extend([
+        comment_start = [
             'Рассуждая об этом, автор указывает на два взаимодополняющих примера.',
-            'Он пишет: "{}".'.format(problem_sentences[0]),
-            'Эту позицию дополнительно подчеркивают такие слова, как: "{}".'.format(problem_sentences[1]),
-            'В итоге авторская позиция ясна: {}\n'.format(problem['author_position']),
+            'В тексте легко найти примеры, поясняющие позицию автора.',
+            'Автор упоминает несколько примеров, обозначающих данную проблему.'
+        ]
+
+        my_position = [
             'Откровенно говоря, я не могу уверенно сказать, что сам когда-либо задумывался над данной проблемой. '
             'Но теперь, прочитав данное произведение автора, я могу сказать, что я целиком и полностью согласен с ним. '
             'Больше того, мне уже даже кажется, что где-то в глубине души я всегда рассуждал именно так. '
-            'И я даже легко вспоминаю другое произведение, в котором поднимается схожий вопрос.',
-            argument + '\n',
+            'И я даже легко вспоминаю другое произведение, в котором поднимается схожий вопрос. {}\n',
+
+            'Не могу не согласиться с такой позицией. Конечно же, автор прав в своих суждениях. '
+            'Чтобы подчеркнуть эту правоту, я хотел бы упомянуть другое произведение, в котором идут рассуждения в схожем ключе. {}\n',
+
+            'В глубине души я бы хотел отвергнуть авторскую позицию. Опровергнуть эти выводы из одного лишь духа противоречия! '
+            'Но нет... Нужно признать: автор прав. Не только лишь аргументы из данного текста - вся мировая литература против меня. '
+            'Как не вспомнить тут ещё одно произведение. {}\nС такими авторитетами не поспоришь (да и не хочется).'
+        ]
+
+        conclusion = [
             'Подводя итоги, хочу сказать, что мне действительно запало в душу данное произведение и, '
-            'подобно герою известного романа Сэлинджера, мне хотелось бы позвонить {} и обсудить это.'.format(author_name)
+            'подобно герою известного романа Сэлинджера, мне хотелось бы позвонить {} и обсудить это.',
+
+            'Подводя итоги, хочу написать, что данная позиция делает честь {}, '
+            'а прекрасный язык усиливает эффект от прочитанного.'
+        ]
+
+        text.extend([
+            random.choice(comment_start),
+            'Он пишет: "{}".'.format(problem_sentences[0]),
+            'Эту позицию дополнительно подчеркивают такие слова, как: "{}".'.format(problem_sentences[1]),
+            'В итоге авторская позиция ясна: {}\n'.format(problem['author_position']),
+            random.choice(my_position).format(argument),
+            random.choice(conclusion).format(author_name)
         ])
 
         text = ' '.join(text)
@@ -246,7 +276,7 @@ class Solver(object):
 
 
 def main():
-    solver = Solver()
+    solver = Solver(problems_path='good_essays_filtered.json')
 
     import os
 
