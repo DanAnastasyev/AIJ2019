@@ -47,7 +47,7 @@ class Evaluation(object):
             solver2.Solver,
             solver3.Solver,
             solver4.Solver,
-            solver5_local.Solver,
+            solver5.Solver,
             solver6.Solver,
             solver7.Solver,
             solver8.Solver,
