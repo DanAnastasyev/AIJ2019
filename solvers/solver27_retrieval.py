@@ -47,11 +47,14 @@ class Solver(object):
         self._predefined_problems, problem_embedded_texts = [], []
         for essay in essays:
             for hint in essay['hints']:
-                problem = fix_spaces(hint['problem']).strip()
+                problem = fix_spaces(hint['problem']).strip(punctuation + ' ')
                 problem = problem.split(' ', 1)[1]
+                comment = fix_spaces(hint['comment']).strip(punctuation + ' ')
+                if len(comment) < 5:
+                    comment = ''
                 hint = {
                     'theme': hint['theme'].strip(),
-                    'comment': fix_spaces(hint['comment']).strip(punctuation + ' '),
+                    'comment': comment,
                     'problem': problem,
                     'author_position': fix_spaces(hint['author_position']).strip(punctuation + ' ') + '.',
                 }
@@ -91,7 +94,7 @@ class Solver(object):
     @staticmethod
     def _get_hint_text(hint):
         hint_text_parts = [hint['problem'].strip(punctuation + ' ') + '.']
-        if hint['comment'].strip(punctuation):
+        if hint['comment'].strip(punctuation + ' '):
             hint_text_parts.append(hint['comment'].strip(punctuation + ' ') + '.')
         hint_text_parts.append(hint['author_position'].strip(punctuation + ' ') + '.')
         return ' '.join(hint_text_parts)
@@ -223,7 +226,7 @@ class Solver(object):
 
         comment_start = [
             'Рассуждая об этом, автор приводит несколько аргументов.',
-            'В тексте легко найти примеры, поясняющие позицию автора.',
+            'В тексте легко найти фразы, поясняющие позицию автора.',
             'Автор последовательно излагает свою точку зрения.'
         ]
 
@@ -279,7 +282,7 @@ class Solver(object):
 
 
 def main():
-    solver = Solver(problems_path='good_essays.json')
+    solver = Solver(problems_path='data/good_essays.json')
 
     import os
 
